@@ -11,6 +11,8 @@ from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from .models import PasswordResetOTP
 from .tasks import send_otp_email
+from .models import Account
+from django.contrib.auth import get_user_model
 
 # class LoginSerializer(serializers.Serializer):
 #     # Client should send "identifier" (username or email) and "password".
@@ -193,15 +195,30 @@ class LoginSerializer(serializers.Serializer):
 
 
 
+User = get_user_model()
+
 class OTPRequestSerializer(serializers.Serializer):
     gmail = serializers.EmailField()
 
-    def validate_email(self, value):
-        # ensure email exists either in Account or Django User
-        exists = Account.objects.filter(gmail__iexact=value).exists() or User.objects.filter(email__iexact=value).exists()
-        if not exists:
-            raise serializers.ValidationError({"error":"enter a valid email"})
+    def validate_gmail(self, value):
+        # Check if this email exists either in Account or User
+        exists_in_account = Account.objects.filter(gmail__iexact=value).exists()
+        exists_in_user = User.objects.filter(email__iexact=value).exists()
+
+        if not (exists_in_account or exists_in_user):
+            # this will attach error to the 'gmail' field
+            raise serializers.ValidationError({"error":"Enter a registered email"})
+
         return value
+# class OTPRequestSerializer(serializers.Serializer):
+#     gmail = serializers.EmailField()
+
+#     def validate_email(self, value):
+#         # ensure email exists either in Account or Django User
+#         exists = Account.objects.filter(gmail__iexact=value).exists() or User.objects.filter(email__iexact=value).exists()
+#         if not exists:
+#             raise serializers.ValidationError({"error":"enter a valid email"})
+#         return value
 
     def save(self, **kwargs):
         gmail = self.validated_data['gmail']
@@ -219,20 +236,126 @@ class OTPVerifySerializer(serializers.Serializer):
     def validate(self, attrs):
         gmail = attrs.get('gmail')
         otp = attrs.get('otp', '').strip()
+         # Base queryset: not used
+        qs = PasswordResetOTP.objects.filter(
+            gmail__iexact=gmail,
+            code=otp,
+            is_used=False
+        )
+
+        # If model has is_verified, exclude already-verified OTPs
+        if hasattr(PasswordResetOTP, "_meta") and any(
+            f.name == "is_verified" for f in PasswordResetOTP._meta.get_fields()
+        ):
+            qs = qs.filter(is_verified=False)
+
         try:
-            otp_rec = PasswordResetOTP.objects.filter(gmail__iexact=gmail, code=otp, is_used=False).latest('created_at')
+            otp_rec = qs.latest('created_at')
         except PasswordResetOTP.DoesNotExist:
             raise serializers.ValidationError({"otp": "invalid or expired otp"})
-        if otp_rec.expired(minutes=getattr(settings, 'PASSWORD_RESET_OTP_EXPIRY_MINUTES', 10)):
+
+        # Expiry check
+        if otp_rec.expired(
+            minutes=getattr(settings, 'PASSWORD_RESET_OTP_EXPIRY_MINUTES', 10)
+        ):
             raise serializers.ValidationError({"otp": "invalid or expired otp"})
-        # Not marking used here — verification only
+
         attrs['otp_rec'] = otp_rec
         return attrs
+        # try:
+        #     otp_rec = PasswordResetOTP.objects.filter(gmail__iexact=gmail, code=otp, is_used=False).latest('created_at')
+        # except PasswordResetOTP.DoesNotExist:
+        #     raise serializers.ValidationError({"otp": "invalid or expired otp"})
+        # if otp_rec.expired(minutes=getattr(settings, 'PASSWORD_RESET_OTP_EXPIRY_MINUTES', 10)):
+        #     raise serializers.ValidationError({"otp": "invalid or expired otp"})
+        # # Not marking used here — verification only
+        # attrs['otp_rec'] = otp_rec
+        # return attrs
+    
+class ResetPasswordSerializer(serializers.Serializer):
+    new_password = serializers.CharField(write_only=True)
+    confirm_password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        new_password = attrs.get('new_password', '')
+        confirm_password = attrs.get('confirm_password', '')
+
+        if new_password != confirm_password:
+            raise serializers.ValidationError({"detail": "new_password and confirm_password do not match"})
+
+        errors = []
+        if len(new_password) < 8:
+            errors.append("password must be at least 8 characters")
+        if not re.search(r'[A-Z]', new_password):
+            errors.append("password must contain at least one uppercase letter")
+        if not re.search(r'\d', new_password):
+            errors.append("password must contain at least one numeric digit")
+        if not re.search(r'[^A-Za-z0-9]', new_password):
+            errors.append("password must contain at least one special character")
+        if errors:
+            raise serializers.ValidationError({"password": errors})
+
+        # store validated password for .save()
+        attrs['new_password_valid'] = new_password
+        return attrs
+
+    def save(self, **kwargs):
+        """
+        Expect the view to pass request in context so we can read header/body reset_token.
+        """
+        request = self.context.get('request')
+        token = None
+        if request:
+            token = request.META.get('HTTP_X_RESET_TOKEN')  # header: X-Reset-Token
+        token = token or self.initial_data.get('reset_token')
+
+        if not token:
+            raise serializers.ValidationError({"detail": "reset token required (X-Reset-Token header or reset_token in body)"})
+
+        # lookup OTP by token
+        try:
+            otp_rec = PasswordResetOTP.objects.get(token=token, is_used=False)
+        except PasswordResetOTP.DoesNotExist:
+            raise serializers.ValidationError({"detail": "invalid or used reset token"})
+
+        # optional: require otp_rec.is_verified if your model has it
+        if hasattr(otp_rec, 'is_verified') and not getattr(otp_rec, 'is_verified', False):
+            raise serializers.ValidationError({"detail": "otp not verified; verify otp first"})
+
+        # check expiry
+        if otp_rec.expired(minutes=getattr(settings, 'PASSWORD_RESET_OTP_EXPIRY_MINUTES', 10)):
+            raise serializers.ValidationError({"detail": "reset token expired; request a new otp"})
+
+        new_password = self.validated_data['new_password_valid']
+        gmail = getattr(otp_rec, 'gmail', None) or getattr(otp_rec, 'email', None)
+        if not gmail:
+            raise serializers.ValidationError({"detail": "internal error: otp has no email"})
+
+        # update Account if present, else update Django User
+        updated = False
+        acc_qs = Account.objects.filter(gmail__iexact=gmail)
+        if acc_qs.exists():
+            acc = acc_qs.first()
+            acc.password = make_password(new_password)
+            acc.save(update_fields=['password'])
+            updated = True
+        else:
+            usr_qs = User.objects.filter(email__iexact=gmail)
+            if usr_qs.exists():
+                u = usr_qs.first()
+                u.set_password(new_password)
+                u.save(update_fields=['password'])
+                updated = True
+
+        # mark OTP used
+        otp_rec.mark_used()
+
+        return updated
 
 
 # class ResetPasswordSerializer(serializers.Serializer):
-#     gmail = serializers.EmailField()
-#     otp = serializers.CharField()
+#     gmail = serializers.EmailField(required=False)
+#     otp = serializers.CharField(required=False)
 #     new_password = serializers.CharField(write_only=True)
 #     confirm_password = serializers.CharField(write_only=True)
 
@@ -296,29 +419,30 @@ class OTPVerifySerializer(serializers.Serializer):
 #         otp_rec.mark_used()
 #         return updated
 
-class ResetPasswordSerializer(serializers.Serializer):
-    new_password = serializers.CharField(write_only=True)
-    confirm_password = serializers.CharField(write_only=True)
+# class ResetPasswordSerializer(serializers.Serializer):
+#     new_password = serializers.CharField(write_only=True)
+#     confirm_password = serializers.CharField(write_only=True)
 
-    def validate(self, attrs):
-        new_password = attrs.get('new_password', '')
-        confirm_password = attrs.get('confirm_password', '')
+#     def validate(self, attrs):
+       
+#         new_password = attrs.get('new_password', '')
+#         confirm_password = attrs.get('confirm_password', '')
 
-        if new_password != confirm_password:
-            raise serializers.ValidationError({"detail": "new_password and confirm_password do not match"})
+#         if new_password != confirm_password:
+#             raise serializers.ValidationError({"detail": "new_password and confirm_password do not match"})
 
-        # password policy checks
-        errors = []
-        if len(new_password) < 8:
-            errors.append("password must be at least 8 characters")
-        if not re.search(r'[A-Z]', new_password):
-            errors.append("password must contain at least one uppercase letter")
-        if not re.search(r'\d', new_password):
-            errors.append("password must contain at least one numeric digit")
-        if not re.search(r'[^A-Za-z0-9]', new_password):
-            errors.append("password must contain at least one special character")
-        if errors:
-            raise serializers.ValidationError({"password": errors})
+#         # password policy checks
+#         errors = []
+#         if len(new_password) < 8:
+#             errors.append("password must be at least 8 characters")
+#         if not re.search(r'[A-Z]', new_password):
+#             errors.append("password must contain at least one uppercase letter")
+#         if not re.search(r'\d', new_password):
+#             errors.append("password must contain at least one numeric digit")
+#         if not re.search(r'[^A-Za-z0-9]', new_password):
+#             errors.append("password must contain at least one special character")
+#         if errors:
+#             raise serializers.ValidationError({"password": errors})
 
-        attrs['new_password_valid'] = new_password
-        return attrs
+#         attrs['new_password_valid'] = new_password
+#         return attrs
