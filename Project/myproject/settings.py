@@ -27,14 +27,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 # corsheaders = ['*'] 
-# CORS_ALLOW_ALL_ORIGINS = True
-# CORS_ALLOWED_ORIGINS = [
-#     # "http://localhost:3000",
-#     # "http://127.0.0.1:3000",
-#     # "http://127.0.0.1:5500",
-#     # "https://your-frontend-domain.com",
-#     "http://localhost:5173",
-# ]
+
 
 CORS_ALLOWED_ORIGINS = ['*']
 
@@ -72,6 +65,7 @@ INSTALLED_APPS = [
     'accounts',
     'rest_framework_simplejwt',
     'corsheaders',
+    
 ]
 
 MIDDLEWARE = [
@@ -165,3 +159,14 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.AllowAny',
     ),
 }
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_HOST_USER = "vanumushashidhar@gmail.com"
+EMAIL_HOST_PASSWORD = "qtye gvwm puhm twsa"   # DO NOT commit to repo
+EMAIL_USE_TLS = True
+DEFAULT_FROM_EMAIL = "Your App <no-reply@yourdomain.com>"
+
+
+PASSWORD_RESET_OTP_EXPIRY_MINUTES = 10
+AUTH_USER_MODEL = 'accounts.Account'
