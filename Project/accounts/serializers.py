@@ -11,306 +11,231 @@ Notes:
 """
 
 from rest_framework import serializers
+from django.contrib.auth import get_user_model, authenticate
+from django.contrib.auth.hashers import make_password
+from django.core.mail import send_mail
 from django.conf import settings
-from django.contrib.auth.hashers import check_password, make_password
-from django.contrib.auth import get_user_model
-from django.core.mail import send_mail, BadHeaderError
-from rest_framework_simplejwt.tokens import RefreshToken
+from django.core.exceptions import ValidationError
 from django.core.cache import cache
-
-import random
-import re
-
-from .models import Account, PasswordResetOTP
+from rest_framework_simplejwt.tokens import RefreshToken
+from accounts.models import Account, PasswordResetOTP
 
 User = get_user_model()
 
-
 # --------------------
-# LOGIN SERIALIZER
+# LOGIN
 # --------------------
 class LoginSerializer(serializers.Serializer):
-    """
-    Accepts an 'identifier' (username or gmail/email) and 'password'.
-    Returns JWT tokens and basic user info on success.
-    """
     identifier = serializers.CharField()
-    username = serializers.CharField(required=False)  # backward compatibility
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
-        #  Extract identifier (username/email/gmail)
-        raw_identifier = (
-            attrs.get("identifier") or
-            attrs.get("username") or
-            self.initial_data.get("gmail") or
-            self.initial_data.get("email")
-        ) or ""
+        identifier = attrs.get("identifier", "").strip()
+        password = attrs.get("password", "")
 
-        identifier = raw_identifier.strip()
-        password = attrs.get("password") or ""
-
-       # -------- IDENTIFIER VALIDATION --------
         if not identifier:
-            raise serializers.ValidationError({"error": "Enter valid username/email"})
-       # -------- PASSWORD VALIDATION --------
+            raise serializers.ValidationError({"error": "Identifier required"})
         if len(password) < 8:
-            raise serializers.ValidationError({"error": "Enter the valid password of minimum 8 characters"})
+            raise serializers.ValidationError({"error": "Invalid password (min 8 chars)"})
 
-        # -------- LOOKUP USER IN Custom Account Model --------
-        account_user = None
-        try:
-            account_user = Account.objects.get(username__iexact=identifier)
-        except Account.DoesNotExist:
-            try:
-                account_user = Account.objects.get(gmail__iexact=identifier)
-            except Account.DoesNotExist:
-                account_user = None
-
-        # -------- LOOKUP USER IN Django User Model --------
-        django_user = None
-        if account_user is None:
-            try:
-                django_user = User.objects.get(username__iexact=identifier)
-            except User.DoesNotExist:
-                try:
-                    django_user = User.objects.get(email__iexact=identifier)
-                except User.DoesNotExist:
-                    django_user = None
-
-        # -------- IF NO USER FOUND --------
-        if account_user is None and django_user is None:
-            raise serializers.ValidationError({"error": "Enter valid username/email"})
-
-        # -------- PASSWORD CHECK --------
-        if account_user is not None:
-            if not check_password(password, account_user.password):
-                raise serializers.ValidationError({"error": "Enter the valid password"})
-            user = account_user
-            user_info = {"id": user.id, "username": user.username, "gmail": user.gmail}
+        # Resolve user (username or gmail or email)
+        user = None
+        if "@" in identifier:
+            # try gmail first then email
+            user = Account.objects.filter(gmail__iexact=identifier).first() or \
+                   User.objects.filter(email__iexact=identifier).first()
+            if not user:
+                raise serializers.ValidationError({"error": "Email not registered"})
         else:
-            if not django_user.check_password(password):
-                raise serializers.ValidationError({"error": "Enter the valid password"})
-            user = django_user
-            user_info = {"id": user.id, "username": user.username, "gmail": getattr(user, "email", "")}
+            user = Account.objects.filter(username__iexact=identifier).first() or \
+                   User.objects.filter(username__iexact=identifier).first()
+            if not user:
+                raise serializers.ValidationError({"error": "Username not found"})
 
-        # -------- GENERATE TOKENS --------
-        refresh = RefreshToken()
-        access = refresh.access_token
-        access["user_id"] = user.id
+        if not user.check_password(password):
+            raise serializers.ValidationError({"error": "Invalid password"})
 
-        return {"refresh": str(refresh), "access": str(access), "user": user_info}
+        refresh = RefreshToken.for_user(user)
+        data = {
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "gmail": getattr(user, "gmail", None) or getattr(user, "email", None)
+            }
+        }
+        return data
 
 
-# --------------------
-# OTP REQUEST SERIALIZER
-# --------------------
+
+
 class OTPRequestSerializer(serializers.Serializer):
-    """
-    Request an OTP to be sent to the provided gmail.
-    Uses synchronous Django send_mail (SMTP). Validate that the gmail exists
-    in either the custom Account model or Django's User model.
-    """
-    gmail = serializers.EmailField()
+    gmail = serializers.EmailField(required=False, allow_blank=True)
 
-    def validate_gmail(self, value):
-        # Check if this email exists either in Account or User
-        exists_in_account = Account.objects.filter(gmail__iexact=value).exists()
-        exists_in_user = User.objects.filter(email__iexact=value).exists()
-        if not (exists_in_account or exists_in_user):
-            # ValidationError expects a string (or list), not a dict
-            raise serializers.ValidationError("Enter a registered email")
-        return value
+    def validate(self, attrs):
+        gmail = attrs.get("gmail", "").strip()
+        if not gmail:
+            raise serializers.ValidationError({"error": "email required"})
+        
+        user = Account.objects.filter(gmail__iexact=gmail).first() or \
+               User.objects.filter(email__iexact=gmail).first()
+        if not user:
+            raise serializers.ValidationError({"error": "email not registered"})
+        
+        self._user = user
+        attrs["gmail"] = gmail
+        return attrs
 
     def save(self, **kwargs):
-        gmail = self.validated_data["gmail"]
-        # generate 4-digit OTP
-        code = f"{random.randint(0, 9999):04d}"
-        otp = PasswordResetOTP.objects.create(gmail=gmail, code=code)
-
-        # Build email content
-        subject = getattr(settings, "PASSWORD_RESET_SUBJECT", "Your OTP Code")
-        message = f"Your password reset OTP is: {code}\nThis OTP is valid for {getattr(settings, 'PASSWORD_RESET_OTP_EXPIRY_MINUTES', 10)} minutes."
+        # Check if user is in cooldown (10 min block after 3 attempts)
+        cooldown_key = f"otp_cooldown_{self._user.id}"
+        if cache.get(cooldown_key):
+            raise serializers.ValidationError({"error": "Too many attempts. Please wait 10 minutes to resend otp"})
+        
+        # Check attempt count
+        attempt_key = f"otp_attempts_{self._user.id}"
+        attempts = cache.get(attempt_key, 0)
+        
+        if attempts >= 3:
+            # Block for 10 minutes
+            cache.set(cooldown_key, True, timeout=600)  # 10 minutes
+            cache.delete(attempt_key)
+            raise serializers.ValidationError({"error": "too many attempts. please wait 10 minutes to resend otp"})
+        
+        # Check basic rate limit (60 seconds between requests)
+        rate_key = f"otp_req_{self._user.id}"
+        if cache.get(rate_key):
+            raise serializers.ValidationError({"error": "wait before requesting new otp"})
+        
+        # Increment attempt counter
+        cache.set(attempt_key, attempts + 1, timeout=600)  # Track attempts for 10 minutes
+        
+        # Create and send OTP
+        otp_obj, raw_code = PasswordResetOTP.create_for_user(self._user, length=4)
+        cache.set(rate_key, True, timeout=60)
+        
+        subject = getattr(settings, "PASSWORD_RESET_SUBJECT", "Password Reset OTP")
+        minutes = getattr(settings, "PASSWORD_RESET_OTP_EXPIRY_MINUTES", 2)
+        msg = f"Your OTP is {raw_code}. Expires in {minutes} minutes."
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
-        try:
-            # synchronous SMTP send
-            send_mail(subject, message, from_email, [gmail], fail_silently=False)
-        except BadHeaderError:
-            # Re-raise as serializer error so view returns 400
-            raise serializers.ValidationError({"error":"Invalid header found when sending email"})
-        except Exception:
-            # Log or return a friendly error
-            # In production log the exception; here we raise SerializerError for the client
-            raise serializers.ValidationError({"error":"Failed to send OTP email:" })
-        return otp
+        send_mail(subject, msg, from_email, [self.validated_data["gmail"]], fail_silently=False)
+        return {"sent": True}
 
 
 # --------------------
-# OTP VERIFY SERIALIZER
+# OTP VERIFY
 # --------------------
 class OTPVerifySerializer(serializers.Serializer):
-    """
-    Verifies the OTP supplied by the user. Attaches the OTP record (otp_record)
-    to validated_data so the view can mark it verified and return the reset token.
-    """
     gmail = serializers.EmailField()
     otp = serializers.CharField()
 
     def validate(self, attrs):
         gmail = attrs.get("gmail")
-        otp = attrs.get("otp", "").strip()
+        raw = attrs.get("otp", "").strip()
+        if not raw.isdigit() or len(raw) != 4:
+            raise serializers.ValidationError({"error": "Invalid OTP format"})
 
-        otp_queryset = PasswordResetOTP.objects.filter(gmail__iexact=gmail, code=otp, is_used=False)
+        user = Account.objects.filter(gmail__iexact=gmail).first() or \
+               User.objects.filter(email__iexact=gmail).first()
+        if not user:
+            raise serializers.ValidationError({"error": "Email not registered"})
 
-        # if model has is_verified, ensure we only consider not-yet-verified records
-        if hasattr(PasswordResetOTP, "_meta") and any(f.name == "is_verified" for f in PasswordResetOTP._meta.get_fields()):
-            otp_queryset = otp_queryset.filter(is_verified=False)
-
-        try:
-            otp_record = otp_queryset.latest("created_at")
-        except PasswordResetOTP.DoesNotExist:
-            raise serializers.ValidationError({"error": "invalid or expired otp"})
-
-        # expiration check
-        if otp_record.expired(minutes=getattr(settings, "PASSWORD_RESET_OTP_EXPIRY_MINUTES", 10)):
-            raise serializers.ValidationError({"error": "invalid or expired otp"})
-
-        attrs["otp_rec"] = otp_record
+        otp_obj = PasswordResetOTP.active_qs_for_user(user).order_by('-created_at').first()
+        if not otp_obj:
+            raise serializers.ValidationError({"error": "OTP has expired"})
+        if otp_obj.expired():
+            raise serializers.ValidationError({"error": "OTP has expired"})
+        if otp_obj.is_used:
+            raise serializers.ValidationError({"error": "OTP already used"})
+        # Direct password check (avoid marking used here)
+        from django.contrib.auth.hashers import check_password
+        if not check_password(raw, otp_obj.code_hash):
+            raise serializers.ValidationError({"error": "Invalid OTP"})
+        otp_obj.is_verified = True
+        otp_obj.save(update_fields=["is_verified"])
+        attrs["reset_token"] = str(otp_obj.token)
+        attrs["user_id"] = user.id
         return attrs
 
-
-# ---------------------
-# RESET PASSWORD SERIALIZER
-# ---------------------
+# --------------------
+# RESET PASSWORD
+# --------------------
 class ResetPasswordSerializer(serializers.Serializer):
-    """
-    Accepts only:
-      - new_password
-      - confirm_password
-    The reset token (UUID) must be provided via header X-Reset-Token OR in the body as 'reset_token'.
-    The serializer validates password policy and uses .save(request=context) to perform the reset.
-    """
+    reset_token = serializers.UUIDField()
     new_password = serializers.CharField(write_only=True)
     confirm_password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
-        new_password = attrs.get("new_password", "")
-        confirm_password = attrs.get("confirm_password", "")
-
-        if new_password != confirm_password:
-            raise serializers.ValidationError({"error": "new_password and confirm_password do not match"})
-
-        # Single IF for password strength
-        if (
-            len(new_password) < 8
-            or not re.search(r"[A-Z]", new_password)
-            or not re.search(r"\d", new_password)
-            or not re.search(r"[^A-Za-z0-9]", new_password)
-        ):
-            raise serializers.ValidationError(
-                {"error": ["Password must be 8+ chars, contain an uppercase letter, a number and a special character."]}
-            )
-
-        attrs["new_password_valid"] = new_password
+        np = attrs.get("new_password", "")
+        cp = attrs.get("confirm_password", "")
+        if np != cp:
+            raise serializers.ValidationError({"error": "passwords do not match"})
+        if len(np) < 8:
+            raise serializers.ValidationError({"error": "invalid password (min 8 chars)"})
+        attrs["valid_pw"] = np
         return attrs
 
     def save(self, **kwargs):
-        # We expect the view to pass the request in context so we can read headers
-        request = self.context.get("request")
-        token = None
-        if request:
-            token = request.META.get("HTTP_X_RESET_TOKEN")
-        token = token or self.initial_data.get("reset_token")
-
-        if not token:
-            raise serializers.ValidationError({"error": "reset token required (X-Reset-Token header or reset_token in body)"})
-
-        # find OTP by token
+        token = self.validated_data["reset_token"]
         try:
-            otp_record = PasswordResetOTP.objects.get(token=token, is_used=False)
+            otp_obj = PasswordResetOTP.objects.get(token=token, is_verified=True, is_used=False)
         except PasswordResetOTP.DoesNotExist:
             raise serializers.ValidationError({"error": "invalid or used reset token"})
 
-        # optional: require verification if model supports it
-        if hasattr(otp_record, "is_verified") and not getattr(otp_record, "is_verified", False):
-            raise serializers.ValidationError({"error": "otp not verified; verify otp first"})
+        if otp_obj.expired():
+            raise serializers.ValidationError({"error": "reset token expired"})
 
-        # OTP-expiry
-        if otp_record.expired(minutes=getattr(settings, "PASSWORD_RESET_OTP_EXPIRY_MINUTES", 10)):
-            raise serializers.ValidationError({"error": "reset token expired; request a new otp"})
+        user = otp_obj.user
+        user.password = make_password(self.validated_data["valid_pw"])
+        user.save(update_fields=["password"])
+        otp_obj.mark_used()
+        return {"reset": True}
 
-        new_password = self.validated_data["new_password_valid"]
-        gmail = getattr(otp_record, "gmail", None) or getattr(otp_record, "email", None)
-        if not gmail:
-            raise serializers.ValidationError({"error": "internal error: otp has no email"})
-
-        # Update Account (custom) or fallback to Django User\
-        updated = False
-        account_queryset = Account.objects.filter(gmail__iexact=gmail)
-        if account_queryset.exists():
-            account = account_queryset.first()
-            account.password = make_password(new_password)
-            account.save(update_fields=["password"])
-            updated = True
-        else:
-            usr_qs = User.objects.filter(email__iexact=gmail)
-            if usr_qs.exists():
-                u = usr_qs.first()
-                u.set_password(new_password)
-                u.save(update_fields=["password"])
-                updated = True
-
-        # mark OTP used
-        try:
-            if hasattr(otp_record, "mark_used"):
-                otp_record.mark_used()
-            else:
-                otp_record.is_used = True
-                otp_record.save(update_fields=["is_used"])
-        except Exception:
-            # In production log the exception. For now we continue.
-            pass
-
-        return updated
-
+# --------------------
+# RESEND OTP
+# --------------------
 class ResendOTPSerializer(serializers.Serializer):
     gmail = serializers.EmailField()
 
     def validate_gmail(self, value):
-        # Re-check email exists (for security)
-        exists_in_account = Account.objects.filter(gmail__iexact=value).exists()
-        exists_in_user = User.objects.filter(email__iexact=value).exists()
-
-        if not (exists_in_account or exists_in_user):
-            raise serializers.ValidationError("Enter a registered email")
+        user = Account.objects.filter(gmail__iexact=value).first() or \
+               User.objects.filter(email__iexact=value).first()
+        if not user:
+            raise serializers.ValidationError({"error": "email not registered"})
+        self._user = user
         return value
 
     def save(self, **kwargs):
-        gmail = self.validated_data['gmail']
-        rate_limit_seconds = getattr(settings, "OTP_RATE_LIMIT_SECONDS", 60)
-        cache_key = f"otp_rate_{gmail.lower()}"
-        if cache.get(cache_key):
-            raise serializers.ValidationError({"error": f"Please wait {rate_limit_seconds} seconds before requesting a new OTP."})
-
-        # mark old otps used
-        PasswordResetOTP.objects.filter(gmail__iexact=gmail, is_used=False).update(is_used=True)
-
-        code = f"{random.randint(0, 9999):04d}"
-        otp = PasswordResetOTP.objects.create(gmail=gmail, code=code)
-
-        # Build email content
-        subject = getattr(settings, "PASSWORD_RESET_SUBJECT", "Your OTP Code")
-        message = f"Your password reset OTP is: {code}\nThis OTP is valid for {getattr(settings, 'PASSWORD_RESET_OTP_EXPIRY_MINUTES', 10)} minutes."
+        # Check cooldown
+        cooldown_key = f"otp_cooldown_{self._user.id}"
+        if cache.get(cooldown_key):
+            raise serializers.ValidationError({"error": "too many attempts. please wait 10 minutes to resend otp"})
+        
+        # Check attempt count
+        attempt_key = f"otp_attempts_{self._user.id}"
+        attempts = cache.get(attempt_key, 0)
+        
+        if attempts >= 3:
+            cache.set(cooldown_key, True, timeout=600)
+            cache.delete(attempt_key)
+            raise serializers.ValidationError({"error": "too many attempts. please wait 10 minutes to resend otp"})
+        
+        # Increment attempts
+        cache.set(attempt_key, attempts + 1, timeout=600)
+        
+        # Mark old OTPs as used and create new one
+        PasswordResetOTP.active_qs_for_user(self._user).update(is_used=True)
+        otp_obj, raw_code = PasswordResetOTP.create_for_user(self._user, length=4)
+        
+        subject = getattr(settings, "PASSWORD_RESET_SUBJECT", "Password Reset OTP")
+        minutes = getattr(settings, "PASSWORD_RESET_OTP_EXPIRY_MINUTES", 2)
+        msg = f"Your OTP is {raw_code}. Expires in {minutes} minutes."
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
+        send_mail(subject, msg, from_email, [self.validated_data["gmail"]], fail_silently=False)
+        return {"resent": True}
 
-        # send_mail as above...
-        try:
-            send_mail(subject, message, from_email, [gmail], fail_silently=False)
-        except Exception:
-            raise serializers.ValidationError({"error": "Failed to send OTP. Please try again later."})
 
-        cache.set(cache_key, True, timeout=rate_limit_seconds)
-        return otp
 
 
 
@@ -340,257 +265,5 @@ class ResendOTPSerializer(serializers.Serializer):
 
 
 
-
-
-
-
-# from rest_framework import serializers
-# from accounts.models import Account
-# from django.contrib.auth.hashers import check_password
-# from django.contrib.auth.models import User
-# from rest_framework_simplejwt.tokens import RefreshToken
-# import random
-# import re
-# from django.conf import settings
-# from django.contrib.auth.hashers import make_password
-# from django.contrib.auth.models import User
-# from .models import PasswordResetOTP
-# from .models import Account
-# from django.contrib.auth import get_user_model
-
-
-
-# class LoginSerializer(serializers.Serializer):
-#     identifier = serializers.CharField()   # username / email / gmail
-#     username = serializers.CharField(required=False)  # backward compatibility
-#     password = serializers.CharField(write_only=True)
-
-#     def validate(self, attrs):
-#         # Extract identifier (username/email/gmail)
-#         raw_identifier = (
-#             attrs.get("identifier") or
-#             attrs.get("username") or
-#             self.initial_data.get("gmail") or
-#             self.initial_data.get("email")
-#         )
-
-#         if raw_identifier is None:
-#             raw_identifier = ""
-
-#         identifier = raw_identifier.strip()
-#         password = attrs.get("password") or ""
-
-#         # -------- IDENTIFIER VALIDATION --------
-#         if not identifier:
-#             raise serializers.ValidationError({"error": "Enter valid username/email"})  
-
-#         # -------- PASSWORD VALIDATION --------
-#         if len(password) < 6:
-#             raise serializers.ValidationError({"error": "Enter the valid password of minimum 6 characters"})
-
-#         # -------- LOOKUP USER IN Custom Account Model --------
-#         account_user = None
-#         try:
-#             account_user = Account.objects.get(username__iexact=identifier)
-#         except Account.DoesNotExist:
-#             try:
-#                 account_user = Account.objects.get(gmail__iexact=identifier)
-#             except Account.DoesNotExist:
-#                 account_user = None
-
-#         # -------- LOOKUP USER IN Django User Model --------
-#         django_user = None
-#         if account_user is None:
-#             try:
-#                 django_user = User.objects.get(username__iexact=identifier)
-#             except User.DoesNotExist:
-#                 try:
-#                     django_user = User.objects.get(email__iexact=identifier)
-#                 except User.DoesNotExist:
-#                     django_user = None
-
-#         # -------- IF NO USER FOUND --------
-#         if account_user is None and django_user is None:
-#             raise serializers.ValidationError({"error": "Enter valid username/email"})
-
-#         # -------- PASSWORD CHECK --------
-#         if account_user is not None:
-#             # Account model user
-#             if not check_password(password, account_user.password):
-#                 raise serializers.ValidationError({"error": "Enter the valid password"})
-#             user = account_user
-#             user_info = {
-#                 "id": user.id,
-#                 "username": user.username,
-#                 "gmail": user.gmail,
-#             }
-#         else:
-#             # Django user
-#             if not django_user.check_password(password):
-#                 raise serializers.ValidationError({"error": "Enter the valid password"})
-#             user = django_user
-#             user_info = {
-#                 "id": user.id,
-#                 "username": user.username,
-#                 "gmail": getattr(user, "email", ""),
-#             }
-
-#         # -------- GENERATE TOKENS --------
-#         refresh = RefreshToken()
-#         access = refresh.access_token
-#         access["user_id"] = user.id
-
-#         return {
-#             "refresh": str(refresh),
-#             "access": str(access),
-#             "user": user_info,
-#         }
-
-
-
-
-
-# User = get_user_model()
-
-# class OTPRequestSerializer(serializers.Serializer):
-#     gmail = serializers.EmailField()
-
-#     def validate_gmail(self, value):
-#         # Check if this email exists either in Account or User
-#         exists_in_account = Account.objects.filter(gmail__iexact=value).exists()
-#         exists_in_user = User.objects.filter(email__iexact=value).exists()
-
-#         if not (exists_in_account or exists_in_user):
-#             # this will attach error to the 'gmail' field
-#             raise serializers.ValidationError({"error":"Enter a registered email"})
-
-#         return value
-
-
-#     def save(self, **kwargs):
-#         gmail = self.validated_data['gmail']
-#         code = f"{random.randint(0, 9999):04d}"
-#         otp = PasswordResetOTP.objects.create(gmail=gmail, code=code)
-        
-#         return otp
-
-
-# class OTPVerifySerializer(serializers.Serializer):
-#     gmail = serializers.EmailField()
-#     otp = serializers.CharField()
-
-#     def validate(self, attrs):
-#         gmail = attrs.get('gmail')
-#         otp = attrs.get('otp', '').strip()
-#          # Base queryset: not used
-#         qs = PasswordResetOTP.objects.filter(
-#             gmail__iexact=gmail,
-#             code=otp,
-#             is_used=False
-#         )
-
-#         # If model has is_verified, exclude already-verified OTPs
-#         if hasattr(PasswordResetOTP, "_meta") and any(
-#             f.name == "is_verified" for f in PasswordResetOTP._meta.get_fields()
-#         ):
-#             qs = qs.filter(is_verified=False)
-
-#         try:
-#             otp_rec = qs.latest('created_at')
-#         except PasswordResetOTP.DoesNotExist:
-#             raise serializers.ValidationError({"otp": "invalid or expired otp"})
-
-#         # Expiry check
-#         if otp_rec.expired(
-#             minutes=getattr(settings, 'PASSWORD_RESET_OTP_EXPIRY_MINUTES', 10)
-#         ):
-#             raise serializers.ValidationError({"otp": "invalid or expired otp"})
-
-#         attrs['otp_rec'] = otp_rec
-#         return attrs
-        
-    
-# class ResetPasswordSerializer(serializers.Serializer):
-#     new_password = serializers.CharField(write_only=True)
-#     confirm_password = serializers.CharField(write_only=True)
-
-#     def validate(self, attrs):
-#         new_password = attrs.get('new_password', '')
-#         confirm_password = attrs.get('confirm_password', '')
-
-#         if new_password != confirm_password:
-#             raise serializers.ValidationError({"detail": "new_password and confirm_password do not match"})
-
-#         errors = []
-#         if (
-#         len(new_password) < 8 or
-#         not re.search(r'[A-Z]', new_password) or
-#         not re.search(r'\d', new_password) or
-#         not re.search(r'[^A-Za-z0-9]', new_password)
-#         ):
-            
-#             raise serializers.ValidationError({
-#         "error": [
-#              "Password does not meet the required strength."
-#         ]
-#     })
-
-
-#         # store validated password for .save()
-#         attrs['new_password_valid'] = new_password
-#         return attrs
-
-#     def save(self, **kwargs):
-#         """
-#         Expect the view to pass request in context so we can read header/body reset_token.
-#         """
-#         request = self.context.get('request')
-#         token = None
-#         if request:
-#             token = request.META.get('HTTP_X_RESET_TOKEN')  # header: X-Reset-Token
-#         token = token or self.initial_data.get('reset_token')
-
-#         if not token:
-#             raise serializers.ValidationError({"detail": "reset token required (X-Reset-Token header or reset_token in body)"})
-
-#         # lookup OTP by token
-#         try:
-#             otp_rec = PasswordResetOTP.objects.get(token=token, is_used=False)
-#         except PasswordResetOTP.DoesNotExist:
-#             raise serializers.ValidationError({"detail": "invalid or used reset token"})
-
-#         # optional: require otp_rec.is_verified if your model has it
-#         if hasattr(otp_rec, 'is_verified') and not getattr(otp_rec, 'is_verified', False):
-#             raise serializers.ValidationError({"detail": "otp not verified; verify otp first"})
-
-#         # check expiry
-#         if otp_rec.expired(minutes=getattr(settings, 'PASSWORD_RESET_OTP_EXPIRY_MINUTES', 10)):
-#             raise serializers.ValidationError({"detail": "reset token expired; request a new otp"})
-
-#         new_password = self.validated_data['new_password_valid']
-#         gmail = getattr(otp_rec, 'gmail', None) or getattr(otp_rec, 'email', None)
-#         if not gmail:
-#             raise serializers.ValidationError({"detail": "internal error: otp has no email"})
-
-#         # update Account if present, else update Django User
-#         updated = False
-#         acc_qs = Account.objects.filter(gmail__iexact=gmail)
-#         if acc_qs.exists():
-#             acc = acc_qs.first()
-#             acc.password = make_password(new_password)
-#             acc.save(update_fields=['password'])
-#             updated = True
-#         else:
-#             usr_qs = User.objects.filter(email__iexact=gmail)
-#             if usr_qs.exists():
-#                 u = usr_qs.first()
-#                 u.set_password(new_password)
-#                 u.save(update_fields=['password'])
-#                 updated = True
-
-#         # mark OTP used
-#         otp_rec.mark_used()
-
-#         return updated
 
 
