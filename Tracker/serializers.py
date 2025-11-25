@@ -33,8 +33,12 @@ class CompanySerializer(serializers.ModelSerializer):
             "municipality",
             "state",
             "country",
-            "tags",       # read-only list of tag objects
-            "tag_ids",    # write-only list of tag ids
+            "poc_name",
+            "poc_designation",
+            "poc_mobile",
+            "poc_email",
+            "tags",      
+            "tag_ids",    
             "created_at",
             "updated_at",
         ]
