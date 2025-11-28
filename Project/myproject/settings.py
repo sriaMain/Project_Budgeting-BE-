@@ -30,12 +30,14 @@ ALLOWED_HOSTS = ['*']
 
 
 CORS_ALLOWED_ORIGINS = ['*']
+CORS_ALLOW_CREDENTIALS = True
 
 
 
 CORS_ALLOWED_ORIGINS = [
     # "http://localhost:55430",  # ✅ Correct (no trailing slash)
     "http://localhost:3000",
+    "http://localhost:5173",
     # "https://gate-check-lwnp.onrender.com" 
     "http://localhost:7000",
    ]
@@ -46,7 +48,7 @@ CORS_ALLOW_ALL_ORIGINS = True  # Only allow specified origins
 #     "https://gate-check-lwnp.onrender.com",
 #     "https://s39c9z90-3000.inc1.devtunnels.ms",
 # ]
-CORS_ALLOW_CREDENTIALS = False
+# CORS_ALLOW_CREDENTIALS = False
 
 
 
@@ -65,6 +67,8 @@ INSTALLED_APPS = [
     'accounts',
     'rest_framework_simplejwt',
     'corsheaders',
+    'module',
+    'product_group',
     
 ]
 
@@ -158,7 +162,29 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.AllowAny',
     ),
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    
 }
+
+
+
+
+SESSION_COOKIE_AGE = 60 * 60 * 24   # 1 day
+SESSION_COOKIE_SECURE = False       # True in production (HTTPS)
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+
+CSRF_COOKIE_SECURE = False          # True in production
+CSRF_COOKIE_SAMESITE = "Lax"
+
+
+    
+
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
@@ -170,3 +196,13 @@ DEFAULT_FROM_EMAIL = "Your App <no-reply@yourdomain.com>"
 
 PASSWORD_RESET_OTP_EXPIRY_MINUTES = 2
 AUTH_USER_MODEL = 'accounts.Account'
+
+
+from datetime import timedelta 
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+}

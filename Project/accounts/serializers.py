@@ -19,6 +19,7 @@ from django.core.exceptions import ValidationError
 from django.core.cache import cache
 from rest_framework_simplejwt.tokens import RefreshToken
 from accounts.models import Account, PasswordResetOTP
+import pytz
 
 User = get_user_model()
 
@@ -76,12 +77,12 @@ class OTPRequestSerializer(serializers.Serializer):
     def validate(self, attrs):
         gmail = attrs.get("gmail", "").strip()
         if not gmail:
-            raise serializers.ValidationError({"error": "email required"})
+            raise serializers.ValidationError({"error": "Email required"})
         
         user = Account.objects.filter(gmail__iexact=gmail).first() or \
                User.objects.filter(email__iexact=gmail).first()
         if not user:
-            raise serializers.ValidationError({"error": "email not registered"})
+            raise serializers.ValidationError({"error": "Email not registered"})
         
         self._user = user
         attrs["gmail"] = gmail
@@ -101,12 +102,12 @@ class OTPRequestSerializer(serializers.Serializer):
             # Block for 10 minutes
             cache.set(cooldown_key, True, timeout=600)  # 10 minutes
             cache.delete(attempt_key)
-            raise serializers.ValidationError({"error": "too many attempts. please wait 10 minutes to resend otp"})
+            raise serializers.ValidationError({"error": "Too many attempts. Please wait 10 minutes to resend otp"})
         
         # Check basic rate limit (60 seconds between requests)
         rate_key = f"otp_req_{self._user.id}"
         if cache.get(rate_key):
-            raise serializers.ValidationError({"error": "wait before requesting new otp"})
+            raise serializers.ValidationError({"error": "Wait one minute before requesting new otp"})
         
         # Increment attempt counter
         cache.set(attempt_key, attempts + 1, timeout=600)  # Track attempts for 10 minutes
@@ -120,8 +121,13 @@ class OTPRequestSerializer(serializers.Serializer):
         msg = f"Your OTP is {raw_code}. Expires in {minutes} minutes."
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
         send_mail(subject, msg, from_email, [self.validated_data["gmail"]], fail_silently=False)
-        return {"sent": True}
-
+        ist = pytz.timezone('Asia/Kolkata')
+        otp_sent_at_ist = otp_obj.created_at.astimezone(ist)
+        
+        return {
+            "sent": True,
+            "otp_sent_at": otp_sent_at_ist.isoformat()
+        }
 
 # --------------------
 # OTP VERIFY
@@ -141,17 +147,46 @@ class OTPVerifySerializer(serializers.Serializer):
         if not user:
             raise serializers.ValidationError({"error": "Email not registered"})
 
+        # Get the most recent active OTP
         otp_obj = PasswordResetOTP.active_qs_for_user(user).order_by('-created_at').first()
+        
         if not otp_obj:
-            raise serializers.ValidationError({"error": "OTP has expired"})
+            # No active OTP found - check if they're entering an old/expired code
+            # Try to find ANY recent OTP (within last 10 minutes) to give better error
+            from datetime import timedelta
+            from django.utils import timezone
+            recent_cutoff = timezone.now() - timedelta(minutes=10)
+            any_recent = PasswordResetOTP.objects.filter(
+                user=user, 
+                created_at__gt=recent_cutoff
+            ).order_by('-created_at').first()
+            
+            if any_recent:
+                # They have a recent OTP but it's either expired or used
+                from django.contrib.auth.hashers import check_password
+                if check_password(raw, any_recent.code_hash):
+                    # They entered the correct code but it's expired/used
+                    raise serializers.ValidationError({"error": "OTP has expired"})
+                else:
+                    # Wrong code
+                    raise serializers.ValidationError({"error": "Invalid OTP"})
+            else:
+                raise serializers.ValidationError({"error": "OTP has expired"})
+        
+        # Check if expired
         if otp_obj.expired():
             raise serializers.ValidationError({"error": "OTP has expired"})
+        
+        # Check if already used
         if otp_obj.is_used:
             raise serializers.ValidationError({"error": "OTP already used"})
-        # Direct password check (avoid marking used here)
+        
+        # Verify the code
         from django.contrib.auth.hashers import check_password
         if not check_password(raw, otp_obj.code_hash):
             raise serializers.ValidationError({"error": "Invalid OTP"})
+        
+        # Mark as verified
         otp_obj.is_verified = True
         otp_obj.save(update_fields=["is_verified"])
         attrs["reset_token"] = str(otp_obj.token)
@@ -170,9 +205,9 @@ class ResetPasswordSerializer(serializers.Serializer):
         np = attrs.get("new_password", "")
         cp = attrs.get("confirm_password", "")
         if np != cp:
-            raise serializers.ValidationError({"error": "passwords do not match"})
+            raise serializers.ValidationError({"error": "Passwords do not match"})
         if len(np) < 8:
-            raise serializers.ValidationError({"error": "invalid password (min 8 chars)"})
+            raise serializers.ValidationError({"error": "Invalid password (min 8 chars)"})
         attrs["valid_pw"] = np
         return attrs
 
@@ -181,10 +216,10 @@ class ResetPasswordSerializer(serializers.Serializer):
         try:
             otp_obj = PasswordResetOTP.objects.get(token=token, is_verified=True, is_used=False)
         except PasswordResetOTP.DoesNotExist:
-            raise serializers.ValidationError({"error": "invalid or used reset token"})
+            raise serializers.ValidationError({"error": "Invalid or used reset token"})
 
         if otp_obj.expired():
-            raise serializers.ValidationError({"error": "reset token expired"})
+            raise serializers.ValidationError({"error": "Reset token expired"})
 
         user = otp_obj.user
         user.password = make_password(self.validated_data["valid_pw"])
@@ -202,7 +237,7 @@ class ResendOTPSerializer(serializers.Serializer):
         user = Account.objects.filter(gmail__iexact=value).first() or \
                User.objects.filter(email__iexact=value).first()
         if not user:
-            raise serializers.ValidationError({"error": "email not registered"})
+            raise serializers.ValidationError({"error": "Email not registered"})
         self._user = user
         return value
 
@@ -210,7 +245,7 @@ class ResendOTPSerializer(serializers.Serializer):
         # Check cooldown
         cooldown_key = f"otp_cooldown_{self._user.id}"
         if cache.get(cooldown_key):
-            raise serializers.ValidationError({"error": "too many attempts. please wait 10 minutes to resend otp"})
+            raise serializers.ValidationError({"error": "Too many attempts. Please wait 10 minutes to resend otp"})
         
         # Check attempt count
         attempt_key = f"otp_attempts_{self._user.id}"
@@ -219,13 +254,14 @@ class ResendOTPSerializer(serializers.Serializer):
         if attempts >= 3:
             cache.set(cooldown_key, True, timeout=600)
             cache.delete(attempt_key)
-            raise serializers.ValidationError({"error": "too many attempts. please wait 10 minutes to resend otp"})
+            raise serializers.ValidationError({"error": "Too many attempts. Please wait 10 minutes to resend otp"})
         
         # Increment attempts
         cache.set(attempt_key, attempts + 1, timeout=600)
         
-        # Mark old OTPs as used and create new one
-        PasswordResetOTP.active_qs_for_user(self._user).update(is_used=True)
+        # ✅ UNCOMMENT THIS - Invalidate old OTPs so only new one is valid
+        PasswordResetOTP.objects.filter(user=self._user, is_used=False).update(is_used=True)
+        
         otp_obj, raw_code = PasswordResetOTP.create_for_user(self._user, length=4)
         
         subject = getattr(settings, "PASSWORD_RESET_SUBJECT", "Password Reset OTP")
@@ -233,7 +269,14 @@ class ResendOTPSerializer(serializers.Serializer):
         msg = f"Your OTP is {raw_code}. Expires in {minutes} minutes."
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
         send_mail(subject, msg, from_email, [self.validated_data["gmail"]], fail_silently=False)
-        return {"resent": True}
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        otp_sent_at_ist = otp_obj.created_at.astimezone(ist)
+        
+        return {
+            "resent": True,
+            "otp_sent_at": otp_sent_at_ist.isoformat()
+        }
 
 
 
