@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'module',
     'product_group',
+    'roles',
     
 ]
 
