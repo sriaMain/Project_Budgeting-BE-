@@ -23,4 +23,5 @@ urlpatterns = [
     path('api/', include('module.urls')),
     path('api/', include('product_group.urls')),
     path('api/roles/', include('roles.urls')),
+    path('api/', include('client.urls')),
 ]

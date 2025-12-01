@@ -25,6 +25,7 @@ from django.utils import timezone
 # c
 
 class PermissionTreeView(APIView):
+    permission_classes = [AllowAny]
     def get(self, request):
         cache_key = "permission_tree_v1"
         data = cache.get(cache_key)
@@ -98,7 +99,7 @@ class CacheTestView(APIView):
 class PermissionFlatListView(APIView):
     # permission_classes = [IsAuthenticated, HasPermissionCode]
     # permission_code = "roles.permissions.view"
-
+    permission_classes = [AllowAny]
     def get(self, request):
         perms = (
             Permission.objects.filter(is_active=True)

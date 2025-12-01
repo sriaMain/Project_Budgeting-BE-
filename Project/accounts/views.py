@@ -47,17 +47,20 @@ class LoginView(APIView):
 
         access = data["access"]
         refresh = data["refresh"]
+        user_id = refresh.payload.get('user_id')
+        user = User.objects.get(id=user_id)
 
         response = Response({
             "message": "Login success",
-            "access_token": access,        # 🔥 send access token in JSON
+            "access_token": access, 
+            "is_authenticated": user.is_active,       # 🔥 send access token in JSON
             "user": data["user"]
         })
 
         # 🔥 send refresh token as secure cookie
         response.set_cookie(
             key="refresh_token",
-            value=refresh,
+            value=str(refresh),
             httponly=True,
             secure=False,   # True in production
             samesite="Lax",
