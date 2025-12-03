@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,32 +21,60 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-a6f*$eh4p!6=lh-+h#*)afw4*t^_5c*sp-is_7gq(=y!sxkyv_'
+# SECRET_KEY = 'django-insecure-a6f*$eh4p!6=lh-+h#*)afw4*t^_5c*sp-is_7gq(=y!sxkyv_'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# DEBUG = True
+DEBUG = os.getenv("DEBUG", "False") == "True"
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
+SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_ME")
 
-ALLOWED_HOSTS = ['*']
+
+# ALLOWED_HOSTS = ['*']
+# corsheaders = ['*'] 
 # corsheaders = ['*'] 
 
 
-# CORS (Cross-Origin Resource Sharing) settings
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://localhost:7000",
-    # Add any other frontend origins you use here
+
+# CORS_ALLOWED_ORIGINS = ['*']
+
+# =======
+CORS_ALLOW_ALL_ORIGINS = True
+
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
 ]
+# >>>>>>> 8d8baa6 (roles code)
+
+
+CORS_ALLOWED_ORIGINS = [
+    # "http://localhost:55430",  # ✅ Correct (no trailing slash)
+
+    "http://localhost:5173",
+    # "https://gate-check-lwnp.onrender.com" 
+    "http://localhost:8000",
+#    "http://localhost:5173",
+
+   ]
+
+CORS_ALLOW_ALL_ORIGINS = True  # Only allow specified origins
 # CORS_ALLOWED_ORIGINS = [
 #     "http://localhost:3000",
 #     "https://gate-check-lwnp.onrender.com",
 #     "https://s39c9z90-3000.inc1.devtunnels.ms",
 # ]
-# CORS_ALLOW_CREDENTIALS = False
 
+CORS_ALLOW_CREDENTIALS = False
 
-
+CORS_ALLOW_CREDENTIALS = True
 
 
 # Application definition
@@ -77,6 +106,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "whitenoise.middleware.WhiteNoiseMiddleware",
 ]
 
 ROOT_URLCONF = 'myproject.urls'
@@ -102,12 +132,23 @@ WSGI_APPLICATION = 'myproject.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.sqlite3',
+#         'NAME': BASE_DIR / 'db.sqlite3',
+#     }
+# }
+import dj_database_url
+import os
+
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    "default": dj_database_url.config(
+        default=os.getenv("DATABASE_URL"),
+        conn_max_age=600,
+        ssl_require=True,
+    )
 }
+
 
 
 # Password validation
@@ -228,3 +269,10 @@ MEDIA_ROOT = BASE_DIR / 'media'  # Fallback/temp path
 # The package will create URLs like: https://res.cloudinary.com/{cloud_name}/image/upload/{path}
  
 print("Using Cloudinary for media storage in production.")
+
+
+# STATIC_URL = "/static/"
+# STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
+# STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"

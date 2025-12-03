@@ -32,6 +32,9 @@ class CompanySerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        
+    required_fields = ["country","state"]
+
 
     def to_representation(self, instance):
         """

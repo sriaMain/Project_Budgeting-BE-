@@ -34,19 +34,19 @@ class ProductGroupSerializer(serializers.ModelSerializer):
         if ProductGroup.objects.filter(product_group_name__iexact=value).exists():
             raise serializers.ValidationError("Product group already exists.")
         return value
-   
+    
 class ProductServicesSerializer(serializers.ModelSerializer):
     """
     Serializer for Product_Services.
-    - On GET, it shows the product_group_name string.
-    - On POST/PUT, it accepts a simple integer ID for product_group.
+    - On GET → show product_group object or product_group_name (if nested).
+    - On POST/PUT → accept product_group as integer primary key.
     """
-    product_group = serializers.SlugRelatedField(
-        slug_field='product_group_name', 
+
+    product_group = serializers.PrimaryKeyRelatedField(
         queryset=ProductGroup.objects.all(),
         allow_null=True
     )
-    
+
     created_by = serializers.StringRelatedField(read_only=True)
     modified_by = serializers.StringRelatedField(read_only=True)
 
@@ -64,15 +64,63 @@ class ProductServicesSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
 
-    def update(self, instance, validated_data):
-        # Set the modified_by user from the request context
+    def create(self, validated_data):
         request = self.context.get('request')
         if request and hasattr(request, 'user'):
-            instance.modified_by = request.user
-        
-        # The 'product_group' in validated_data is a ProductGroup instance
-        # because PrimaryKeyRelatedField resolves the ID to an object.
+            validated_data['created_by'] = request.user
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        request = self.context.get('request')
+        if request and hasattr(request, 'user'):
+            validated_data['modified_by'] = request.user
         return super().update(instance, validated_data)
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.product_group:
+            data['product_group'] = instance.product_group.product_group_name
+        return data
+
+
+   
+# class ProductServicesSerializer(serializers.ModelSerializer):
+#     """
+#     Serializer for Product_Services.
+#     - On GET, it shows the product_group_name string.
+#     - On POST/PUT, it accepts a simple integer ID for product_group.
+#     """
+#     product_group = serializers.SlugRelatedField(
+#         slug_field='product_group_name', 
+#         queryset=ProductGroup.objects.all(),
+#         allow_null=True
+#     )
+    
+#     created_by = serializers.StringRelatedField(read_only=True)
+#     modified_by = serializers.StringRelatedField(read_only=True)
+
+#     class Meta:
+#         model = Product_Services
+#         fields = [
+#             'id',
+#             'product_group',
+#             'product_service_name',
+#             'description',
+#             'is_active',
+#             'created_by',
+#             'modified_by',
+#             'created_at',
+#             'updated_at',
+#         ]
+
+#     def update(self, instance, validated_data):
+#         # Set the modified_by user from the request context
+#         request = self.context.get('request')
+#         if request and hasattr(request, 'user'):
+#             instance.modified_by = request.user
+        
+#         # The 'product_group' in validated_data is a ProductGroup instance
+#         # because PrimaryKeyRelatedField resolves the ID to an object.
+#         return super().update(instance, validated_data)
 
 # --- QUOTATION SERIALIZERS ---
 

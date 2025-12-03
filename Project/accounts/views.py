@@ -231,6 +231,7 @@ class UserCreateView(APIView):
         try:
             serializer.is_valid(raise_exception=True)
             user = serializer.save()
+            cache.delete("users_list")  # Invalidate user list cache
 
             return Response(
                 {

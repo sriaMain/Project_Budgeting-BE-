@@ -74,7 +74,7 @@ class OTPRequestSerializer(serializers.Serializer):
     def validate(self, attrs):
         email = attrs.get("email", "").strip()
         if not email:
-            raise serializers.ValidationError({"error": "Email required"})
+            raise serializers.ValidationError({"error": "Invalid email"})
         
         user = User.objects.filter(email__iexact=email).first()
         if not user:
