@@ -9,14 +9,9 @@ class CompanyTagSerializer(serializers.ModelSerializer):
 
 
 class CompanySerializer(serializers.ModelSerializer):
-    # read tags as objects
-    tags = CompanyTagSerializer(many=True, read_only=True)
-    # write tags by id list
-    tag_ids = serializers.PrimaryKeyRelatedField(
+    tags = serializers.PrimaryKeyRelatedField(
         many=True,
-        write_only=True,
         queryset=CompanyTag.objects.all(),
-        source="tags"
     )
 
     class Meta:
@@ -33,11 +28,18 @@ class CompanySerializer(serializers.ModelSerializer):
             "municipality",
             "state",
             "country",
-            "tags",      
-            "tag_ids",    
+            "tags",
             "created_at",
             "updated_at",
         ]
+
+    def to_representation(self, instance):
+        """
+        Customize the representation to show nested tags on read.
+        """
+        representation = super().to_representation(instance)
+        representation['tags'] = CompanyTagSerializer(instance.tags.all(), many=True).data
+        return representation
 
 class PointOfContactSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source='company.company_name', read_only=True)

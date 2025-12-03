@@ -41,16 +41,10 @@ class ProductServicesSerializer(serializers.ModelSerializer):
     - On GET, it shows the product_group_name string.
     - On POST/PUT, it accepts a simple integer ID for product_group.
     """
-    # This field is used for writing (POST/PUT). It accepts an integer ID.
-    # It is not included in the response because of `write_only=True`.
-    product_group = serializers.PrimaryKeyRelatedField(
-        queryset=ProductGroup.objects.all(), write_only=True, allow_null=True
-    )
-
-    # This field is used for reading (GET). It shows only the name string.
-    # It is not used for writing because of `read_only=True`.
-    product_group_name = serializers.SlugRelatedField(
-        source='product_group', slug_field='product_group_name', read_only=True
+    product_group = serializers.SlugRelatedField(
+        slug_field='product_group_name', 
+        queryset=ProductGroup.objects.all(),
+        allow_null=True
     )
     
     created_by = serializers.StringRelatedField(read_only=True)
@@ -60,8 +54,7 @@ class ProductServicesSerializer(serializers.ModelSerializer):
         model = Product_Services
         fields = [
             'id',
-            'product_group',          # Writable ID field
-            'product_group_name',     # Read-only name field
+            'product_group',
             'product_service_name',
             'description',
             'is_active',

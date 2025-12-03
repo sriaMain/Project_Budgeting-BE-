@@ -29,20 +29,14 @@ ALLOWED_HOSTS = ['*']
 # corsheaders = ['*'] 
 
 
-CORS_ALLOWED_ORIGINS = ['*']
+# CORS (Cross-Origin Resource Sharing) settings
 CORS_ALLOW_CREDENTIALS = True
-
-
-
 CORS_ALLOWED_ORIGINS = [
-    # "http://localhost:55430",  # ✅ Correct (no trailing slash)
     "http://localhost:3000",
     "http://localhost:5173",
-    # "https://gate-check-lwnp.onrender.com" 
     "http://localhost:7000",
-   ]
-
-CORS_ALLOW_ALL_ORIGINS = True  # Only allow specified origins
+    # Add any other frontend origins you use here
+]
 # CORS_ALLOWED_ORIGINS = [
 #     "http://localhost:3000",
 #     "https://gate-check-lwnp.onrender.com",
@@ -158,7 +152,6 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
-    'EXCEPTION_HANDLER': 'accounts.exceptions.custom_exception_handler',
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
@@ -209,3 +202,29 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
 }
+
+
+from dotenv import load_dotenv
+load_dotenv()
+
+import os
+print("Cloud Name:", os.environ.get("CLOUDINARY_CLOUD_NAME"))
+print("APiKey", os.environ.get("CLOUDINARY_API_KEY"))
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': os.environ.get("CLOUDINARY_CLOUD_NAME"),
+    'API_KEY':os.environ.get("CLOUDINARY_API_KEY"),
+    'API_SECRET':os.environ.get("CLOUDINARY_API_SECRET"),
+    'SECURE': True,
+    'AUTHENTICATED': False,
+}
+ 
+DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+ 
+# ✅ Cloudinary media configuration
+MEDIA_ROOT = BASE_DIR / 'media'  # Fallback/temp path
+
+ 
+# Don't set MEDIA_URL - let cloudinary_storage generate the correct URL automatically
+# The package will create URLs like: https://res.cloudinary.com/{cloud_name}/image/upload/{path}
+ 
+print("Using Cloudinary for media storage in production.")

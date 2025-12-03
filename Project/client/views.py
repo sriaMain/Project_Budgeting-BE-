@@ -14,23 +14,6 @@ from .models import POC
 from .serializers import PointOfContactSerializer
 
 
-def get_first_error_message(errors):
-    """
-    Extracts the first error message from a DRF serializer error dictionary.
-    """
-    if not isinstance(errors, dict):
-        if isinstance(errors, list) and errors:
-            return errors[0]
-        return str(errors)
-
-    if 'non_field_errors' in errors and errors['non_field_errors']:
-        return errors['non_field_errors'][0]
-
-    for field, messages in errors.items():
-        if isinstance(messages, list) and messages:
-            return messages[0]
-            
-    return "An unknown validation error occurred."
 
 
 class CompanyListCreateAPIView(APIView):
@@ -47,15 +30,25 @@ class CompanyListCreateAPIView(APIView):
             )
 
     def post(self, request):
+        serializer = CompanySerializer(data=request.data)
         try:
-            serializer = CompanySerializer(data=request.data)
-
-            if serializer.is_valid():
-                company = serializer.save()
-                read_serializer = CompanySerializer(company)
-                return Response(read_serializer.data, status=status.HTTP_201_CREATED)
-
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            serializer.is_valid(raise_exception=True)
+            company = serializer.save()
+            read_serializer = CompanySerializer(company)
+            return Response(read_serializer.data, status=status.HTTP_201_CREATED)
+        
+        except DRFValidationError as e:
+            formatted_errors = {}
+            errors = e.detail
+            for field, messages in errors.items():
+                if isinstance(messages, list) and messages:
+                    message = messages[0]
+                    field_name = field.replace('_', ' ')
+                    if "This field is required." in message:
+                        formatted_errors[field] = f"{field_name.lower()} is required"
+                    else:
+                        formatted_errors[field] = message
+            return Response({"errors": formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
 
         except ValidationError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -226,8 +219,8 @@ class PointOfContactListCreateAPIView(APIView):
             )
 
     def post(self, request):
+        serializer = PointOfContactSerializer(data=request.data)
         try:
-            serializer = PointOfContactSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             poc = serializer.save()
             return Response(
@@ -235,8 +228,17 @@ class PointOfContactListCreateAPIView(APIView):
                 status=status.HTTP_201_CREATED,
             )
         except DRFValidationError as e:
-            error_message = get_first_error_message(e.detail)
-            return Response({"error": error_message}, status=status.HTTP_400_BAD_REQUEST)
+            formatted_errors = {}
+            errors = e.detail
+            for field, messages in errors.items():
+                if isinstance(messages, list) and messages:
+                    message = messages[0]
+                    field_name = field.replace('_', ' ')
+                    if "This field is required." in message:
+                        formatted_errors[field] = f"{field_name.lower()} is required"
+                    else:
+                        formatted_errors[field] = message
+            return Response({"errors": formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
 
         except DatabaseError:
             return Response(
@@ -268,9 +270,9 @@ class PointOfContactDetailAPIView(APIView):
             )
 
     def put(self, request, pk):
+        poc = self.get_object(pk)
+        serializer = PointOfContactSerializer(poc, data=request.data, partial=True)
         try:
-            poc = self.get_object(pk)
-            serializer = PointOfContactSerializer(poc, data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
             updated_poc = serializer.save()
             return Response(
@@ -278,8 +280,17 @@ class PointOfContactDetailAPIView(APIView):
                 status=status.HTTP_200_OK,
             )
         except DRFValidationError as e:
-            error_message = get_first_error_message(e.detail)
-            return Response({"error": error_message}, status=status.HTTP_400_BAD_REQUEST)
+            formatted_errors = {}
+            errors = e.detail
+            for field, messages in errors.items():
+                if isinstance(messages, list) and messages:
+                    message = messages[0]
+                    field_name = field.replace('_', ' ')
+                    if "This field is required." in message:
+                        formatted_errors[field] = f"{field_name.lower()} is required"
+                    else:
+                        formatted_errors[field] = message
+            return Response({"errors": formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
             return Response(
@@ -288,9 +299,9 @@ class PointOfContactDetailAPIView(APIView):
             )
 
     def patch(self, request, pk):
+        poc = self.get_object(pk)
+        serializer = PointOfContactSerializer(poc, data=request.data, partial=True)
         try:
-            poc = self.get_object(pk)
-            serializer = PointOfContactSerializer(poc, data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
             updated_poc = serializer.save()
             return Response(
@@ -298,8 +309,17 @@ class PointOfContactDetailAPIView(APIView):
                 status=status.HTTP_200_OK,
             )
         except DRFValidationError as e:
-            error_message = get_first_error_message(e.detail)
-            return Response({"error": error_message}, status=status.HTTP_400_BAD_REQUEST)
+            formatted_errors = {}
+            errors = e.detail
+            for field, messages in errors.items():
+                if isinstance(messages, list) and messages:
+                    message = messages[0]
+                    field_name = field.replace('_', ' ')
+                    if "This field is required." in message:
+                        formatted_errors[field] = f"{field_name.lower()} is required"
+                    else:
+                        formatted_errors[field] = message
+            return Response({"errors": formatted_errors}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
             return Response(
@@ -317,3 +337,21 @@ class PointOfContactDetailAPIView(APIView):
                 {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+class CompanyPOCListView(APIView):
+    """
+    API view to retrieve all Points of Contact for a specific company.
+    """
+    permission_classes = [All]
+
+    def get(self, request, company_id):
+        # Ensure the company exists
+        company = get_object_or_404(Company, pk=company_id)
+        
+        # Filter POCs by the company
+        pocs = POC.objects.filter(company=company)
+        
+        # Serialize the results
+        serializer = PointOfContactSerializer(pocs, many=True)
+        
+        return Response(serializer.data, status=status.HTTP_200_OK)

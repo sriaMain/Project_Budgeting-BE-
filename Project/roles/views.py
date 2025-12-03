@@ -159,7 +159,7 @@ class RoleListCreateView(APIView):
             return response
 
         roles = (
-            Role.objects.filter(is_active=True)
+            Role.objects.filter()
             # .prefetch_related("permissions")
             .order_by("role_name")
         )
@@ -237,7 +237,9 @@ class RoleListCreateView(APIView):
 
 
 class RoleDetailView(APIView):
-    permission_classes = [IsAuthenticated, HasPermissionCode]
+    # permission_classes = [IsAuthenticated, HasPermissionCode]
+    permission_classes = [AllowAny]
+
 
     permission_map = {
         "GET": "roles.view",
@@ -249,8 +251,7 @@ class RoleDetailView(APIView):
     def get_object(self, pk):
         return get_object_or_404(
             Role.objects.prefetch_related("permissions"),
-            pk=pk,
-            is_active=True,
+            pk=pk
         )
 
     def get(self, request, pk):
@@ -262,14 +263,15 @@ class RoleDetailView(APIView):
 
     def put(self, request, pk):
         role = self.get_object(pk)
-        serializer = RoleWriteSerializer(role, data=request.data)
+        serializer = RoleWriteSerializer(role, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
 
         updated = serializer.save()
+        cache.delete("roles_list_v1")  # Invalidate cache
         return Response(
             RoleDetailSerializer(updated).data,
-            status=status.HTTP_200_OK
-        )
+            status=status.HTTP_200_OK)
+    
 
     def patch(self, request, pk):
         role = self.get_object(pk)
@@ -277,6 +279,7 @@ class RoleDetailView(APIView):
         serializer.is_valid(raise_exception=True)
 
         updated = serializer.save()
+        cache.delete("roles_list_v1")  # Invalidate cache
         return Response(
             RoleDetailSerializer(updated).data,
             status=status.HTTP_200_OK

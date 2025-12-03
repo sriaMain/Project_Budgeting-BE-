@@ -6,12 +6,44 @@ from django.contrib.auth.models import AbstractUser
 from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 import random
+from roles.models import RBACUserMixin# from rbac.models import RBACUserMixin
+from cloudinary_storage.storage import MediaCloudinaryStorage
 
-class Account(AbstractUser):
-    gmail = models.EmailField(unique=True, null=True, blank=True)
+
+class Account(AbstractUser, RBACUserMixin):
+    email = models.EmailField(unique=True, null=True, blank=True, db_index=True)
+    position = models.CharField(max_length=100, blank=True)
+    module = models.ForeignKey(
+        'product_group.Product_Services', on_delete=models.SET_NULL,
+        related_name='accounts', null=True, blank=True
+    )
+    charges_per_hour = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    # Do not force a specific storage backend here — use the project's
+    # DEFAULT_FILE_STORAGE. This avoids instantiating Cloudinary storage
+    # during model import when Cloudinary credentials may be invalid.
+    profile_picture = models.ImageField(
+        upload_to="profile_pictures/",
+        null=True,
+        blank=True,
+        storage=MediaCloudinaryStorage()
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+    is_active =models.BooleanField(default=True)
+    # languages =models.CharField(max_length=100, blank=True)
+    languages = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["first_name", "last_name"]
 
     def __str__(self):
-        return self.username
+        return f"{self.get_full_name()} ({self.email or self.username})"
+
 
 class PasswordResetOTP(models.Model):
     user = models.ForeignKey(

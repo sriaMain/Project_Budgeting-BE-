@@ -3,8 +3,8 @@ from .models import Account, PasswordResetOTP
 
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):
-    list_display = ('id', 'username', 'gmail', 'email', 'is_active', 'is_staff')
-    search_fields = ('username', 'email', 'gmail')
+    list_display = ('id', 'username', 'email', 'is_active', 'is_staff')
+    search_fields = ('username', 'email',)
 
 @admin.register(PasswordResetOTP)
 class PasswordResetOTPAdmin(admin.ModelAdmin):

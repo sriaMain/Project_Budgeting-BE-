@@ -39,17 +39,14 @@ class LoginSerializer(serializers.Serializer):
         if len(password) < 8:
             raise serializers.ValidationError({"error": "Invalid password (min 8 chars)"})
 
-        # Resolve user (username or gmail or email)
+        # Resolve user (username or email)
         user = None
         if "@" in identifier:
-            # try gmail first then email
-            user = Account.objects.filter(gmail__iexact=identifier).first() or \
-                   User.objects.filter(email__iexact=identifier).first()
+            user = User.objects.filter(email__iexact=identifier).first()
             if not user:
                 raise serializers.ValidationError({"error": "Email not registered"})
         else:
-            user = Account.objects.filter(username__iexact=identifier).first() or \
-                   User.objects.filter(username__iexact=identifier).first()
+            user = User.objects.filter(username__iexact=identifier).first()
             if not user:
                 raise serializers.ValidationError({"error": "Username not found"})
 
@@ -63,7 +60,7 @@ class LoginSerializer(serializers.Serializer):
             "user": {
                 "id": user.id,
                 "username": user.username,
-                "gmail": getattr(user, "gmail", None) or getattr(user, "email", None)
+                "email": user.email
             }
         }
         return data
@@ -72,20 +69,19 @@ class LoginSerializer(serializers.Serializer):
 
 
 class OTPRequestSerializer(serializers.Serializer):
-    gmail = serializers.EmailField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
 
     def validate(self, attrs):
-        gmail = attrs.get("gmail", "").strip()
-        if not gmail:
+        email = attrs.get("email", "").strip()
+        if not email:
             raise serializers.ValidationError({"error": "Email required"})
         
-        user = Account.objects.filter(gmail__iexact=gmail).first() or \
-               User.objects.filter(email__iexact=gmail).first()
+        user = User.objects.filter(email__iexact=email).first()
         if not user:
             raise serializers.ValidationError({"error": "Email not registered"})
         
         self._user = user
-        attrs["gmail"] = gmail
+        attrs["email"] = email
         return attrs
 
     def save(self, **kwargs):
@@ -120,7 +116,7 @@ class OTPRequestSerializer(serializers.Serializer):
         minutes = getattr(settings, "PASSWORD_RESET_OTP_EXPIRY_MINUTES", 2)
         msg = f"Your OTP is {raw_code}. Expires in {minutes} minutes."
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
-        send_mail(subject, msg, from_email, [self.validated_data["gmail"]], fail_silently=False)
+        send_mail(subject, msg, from_email, [self.validated_data["email"]], fail_silently=False)
         ist = pytz.timezone('Asia/Kolkata')
         otp_sent_at_ist = otp_obj.created_at.astimezone(ist)
         
@@ -133,17 +129,16 @@ class OTPRequestSerializer(serializers.Serializer):
 # OTP VERIFY
 # --------------------
 class OTPVerifySerializer(serializers.Serializer):
-    gmail = serializers.EmailField()
+    email = serializers.EmailField()
     otp = serializers.CharField()
 
     def validate(self, attrs):
-        gmail = attrs.get("gmail")
+        email = attrs.get("email")
         raw = attrs.get("otp", "").strip()
         if not raw.isdigit() or len(raw) != 4:
             raise serializers.ValidationError({"error": "Invalid OTP format"})
 
-        user = Account.objects.filter(gmail__iexact=gmail).first() or \
-               User.objects.filter(email__iexact=gmail).first()
+        user = User.objects.filter(email__iexact=email).first()
         if not user:
             raise serializers.ValidationError({"error": "Email not registered"})
 
@@ -279,7 +274,130 @@ class ResendOTPSerializer(serializers.Serializer):
         }
 
 
+class UserListSerializer(serializers.ModelSerializer):
+    roles = serializers.SerializerMethodField()
 
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "email",
+            "position",
+            "module",
+            "charges_per_hour",
+            "roles",
+            'profile_picture',
+            "is_active",
+            "languages"
+        ]
+
+    def get_roles(self, obj):
+        return [r.id for r in obj.roles.all()]
+        
+
+
+class UserDetailSerializer(serializers.ModelSerializer):
+    roles = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "email",
+            "position",
+            "module",
+            "charges_per_hour",
+            "profile_picture",
+            "roles",
+            "languages",
+            "created_at",
+            "modified_at",
+            "is_active",
+        ]
+
+    def get_roles(self, obj):
+        return [r.id for r in obj.roles.all()]
+
+from rest_framework.validators import UniqueValidator
+from roles.models import Role
+from product_group.models import Product_Services
+import uuid
+
+class UserCreateSerializer(serializers.ModelSerializer):
+    roles = serializers.PrimaryKeyRelatedField(
+        queryset=Role.objects.filter(is_active=True),
+        many=True,
+        required=True,
+        allow_empty=False,  # Ensures at least one role is provided
+        error_messages={
+            'required': 'The roles field is required.',
+            'allow_empty': 'At least one role must be selected.',
+            'does_not_exist': 'Invalid role pk "{pk_value}" - object does not exist.',
+        }
+    )
+
+    email = serializers.EmailField(
+        required=True,
+        validators=[UniqueValidator(
+            queryset=Account.objects.all(),
+            message="A user with this email already exists."
+        )]
+    )
+    first_name = serializers.CharField(required=True)
+    position = serializers.CharField(required=True)
+    module = serializers.PrimaryKeyRelatedField(
+        queryset=Product_Services.objects.all(), 
+        required=True
+    )
+    charges_per_hour = serializers.DecimalField(max_digits=10, decimal_places=2, required=True)
+
+    class Meta:
+        model = Account
+        fields = [
+            "first_name",
+            "last_name",
+            "email",
+            "position",
+            "module",
+            "charges_per_hour",
+            "roles",
+            "profile_picture",
+            "languages",
+            "is_active",
+        ]
+
+    def validate_email(self, value):
+        """Normalize email to lowercase and strip whitespace"""
+        return value.lower().strip()
+
+    def validate_charges_per_hour(self, value):
+        """Ensure charges_per_hour is positive if provided"""
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Charges per hour must be positive.")
+        return value
+
+    def create(self, validated_data):
+        roles = validated_data.pop("roles", [])
+        email = validated_data.pop("email").lower().strip()
+        
+        # Ensure a unique username (required by AbstractUser)
+        base_username = email.split("@")[0]
+        username = f"{base_username}-{uuid.uuid4().hex[:8]}"
+        
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            **validated_data
+        )
+        
+        if roles:
+            user.roles.set(roles)
+            
+        return user
 
 
 
