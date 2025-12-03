@@ -21,16 +21,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-# SECRET_KEY = 'django-insecure-a6f*$eh4p!6=lh-+h#*)afw4*t^_5c*sp-is_7gq(=y!sxkyv_'
+SECRET_KEY = 'django-insecure-a6f*$eh4p!6=lh-+h#*)afw4*t^_5c*sp-is_7gq(=y!sxkyv_'
 
 # SECURITY WARNING: don't run with debug turned on in production!
+
+
 # DEBUG = True
-DEBUG = os.getenv("DEBUG", "False") == "True"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
-SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_ME")
+# DEBUG = os.getenv("DEBUG", "False") == "True"
+# ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
+# SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_ME")
 
 
-# ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['*']
 # corsheaders = ['*'] 
 # corsheaders = ['*'] 
 
@@ -132,22 +134,22 @@ WSGI_APPLICATION = 'myproject.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': BASE_DIR / 'db.sqlite3',
-#     }
-# }
-import dj_database_url
-import os
-
 DATABASES = {
-    "default": dj_database_url.config(
-        default=os.getenv("DATABASE_URL"),
-        conn_max_age=600,
-        ssl_require=True,
-    )
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    }
 }
+# import dj_database_url
+# import os
+
+# DATABASES = {
+#     "default": dj_database_url.config(
+#         default=os.getenv("DATABASE_URL"),
+#         conn_max_age=600,
+#         ssl_require=True,
+#     )
+# }
 
 
 
