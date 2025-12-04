@@ -64,6 +64,7 @@ CORS_ALLOWED_ORIGINS = [
     # "https://gate-check-lwnp.onrender.com" 
     "http://localhost:8000",
 #    "http://localhost:5173",
+    "https://project-budgeting-fe.onrender.com/",
 
    ]
 
