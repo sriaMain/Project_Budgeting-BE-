@@ -8,10 +8,46 @@ class CompanyTagSerializer(serializers.ModelSerializer):
         fields = ["id", "name"]
 
 
+# class CompanySerializer(serializers.ModelSerializer):
+#     tags = serializers.PrimaryKeyRelatedField(
+#         many=True,
+#         queryset=CompanyTag.objects.all(),
+#     )
+
+#     class Meta:
+#         model = Company
+#         fields = [
+#             "id",
+#             "company_name",
+#             "mobile_number",
+#             "email",
+#             "gstin",
+#             "street_address",
+#             "city",
+#             "postal_code",
+#             "municipality",
+#             "state",
+#             "country",
+#             "tags",
+#             "created_at",
+#             "updated_at",
+#         ]
+        
+#     required_fields = ["country","state"]
+
+
+#     def to_representation(self, instance):
+#         """
+#         Customize the representation to show nested tags on read.
+#         """
+#         representation = super().to_representation(instance)
+#         representation['tags'] = CompanyTagSerializer(instance.tags.all(), many=True).data
+#         # return representation
 class CompanySerializer(serializers.ModelSerializer):
     tags = serializers.PrimaryKeyRelatedField(
         many=True,
         queryset=CompanyTag.objects.all(),
+        required=False,   # Important
     )
 
     class Meta:
@@ -32,17 +68,24 @@ class CompanySerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        
-    required_fields = ["country","state"]
-
+        extra_kwargs = {
+            "country": {"required": True},
+            "state": {"required": True},
+            # All other fields optional during update
+            "email": {"required": False},
+            "company_name": {"required": False},
+            "mobile_number": {"required": False},
+            "gstin": {"required": False},
+            "street_address": {"required": False},
+            "city": {"required": False},
+            "postal_code": {"required": False},
+            "municipality": {"required": False},
+        }
 
     def to_representation(self, instance):
-        """
-        Customize the representation to show nested tags on read.
-        """
-        representation = super().to_representation(instance)
-        representation['tags'] = CompanyTagSerializer(instance.tags.all(), many=True).data
-        return representation
+        rep = super().to_representation(instance)
+        rep['tags'] = CompanyTagSerializer(instance.tags.all(), many=True).data
+        return rep
 
 class PointOfContactSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source='company.company_name', read_only=True)

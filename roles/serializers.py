@@ -47,11 +47,11 @@ class PermissionCategorySerializer(serializers.ModelSerializer):
 
 
 
-
 class RoleWriteSerializer(serializers.ModelSerializer):
     """
-    Accepts only permission IDs
-    Used for create/update
+    Secure version:
+    - Requires at least one permission during CREATE
+    - Allows optional permissions during UPDATE
     """
     permissions = serializers.PrimaryKeyRelatedField(
         many=True,
@@ -63,21 +63,34 @@ class RoleWriteSerializer(serializers.ModelSerializer):
         model = Role
         fields = ["id", "role_name", "description", "is_active", "permissions"]
 
-    def validate_role_name(self, value):
+    def validate(self, data):
         """
-        Case-insensitive role name validation
-        Admin ≠ admin
+        Enforce:
+        - CREATE: permissions must exist and cannot be empty
+        - UPDATE: permissions optional
         """
-        name = value.strip()
+        is_create = self.instance is None
+        permissions = data.get("permissions")
 
+        if is_create:
+            if not permissions:
+                raise serializers.ValidationError({
+                    "error": "At least one active permission is required to create a role."
+                })
+
+        return data
+
+    def validate_role_name(self, value):
+        name = value.strip()
         qs = Role.objects.filter(role_name__iexact=name)
-        # Exclude current instance on update
+
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
 
         if qs.exists():
             raise serializers.ValidationError("Role name already exists.")
         return name
+
 
 
 class RoleListSerializer(serializers.ModelSerializer):
