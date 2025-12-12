@@ -8,41 +8,7 @@ class CompanyTagSerializer(serializers.ModelSerializer):
         fields = ["id", "name"]
 
 
-# class CompanySerializer(serializers.ModelSerializer):
-#     tags = serializers.PrimaryKeyRelatedField(
-#         many=True,
-#         queryset=CompanyTag.objects.all(),
-#     )
 
-#     class Meta:
-#         model = Company
-#         fields = [
-#             "id",
-#             "company_name",
-#             "mobile_number",
-#             "email",
-#             "gstin",
-#             "street_address",
-#             "city",
-#             "postal_code",
-#             "municipality",
-#             "state",
-#             "country",
-#             "tags",
-#             "created_at",
-#             "updated_at",
-#         ]
-        
-#     required_fields = ["country","state"]
-
-
-#     def to_representation(self, instance):
-#         """
-#         Customize the representation to show nested tags on read.
-#         """
-#         representation = super().to_representation(instance)
-#         representation['tags'] = CompanyTagSerializer(instance.tags.all(), many=True).data
-#         # return representation
 class CompanySerializer(serializers.ModelSerializer):
     tags = serializers.PrimaryKeyRelatedField(
         many=True,

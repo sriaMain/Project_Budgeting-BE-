@@ -67,10 +67,11 @@ class Quote(models.Model):
     date_of_issue = models.DateField()
     due_date = models.DateField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Oppurtunity')
+
     
     # Link to the Client and POC models
     client = models.ForeignKey('client.Company', on_delete=models.SET_NULL, related_name='quotes', null=True)
-    # poc = models.ForeignKey('client.POC', on_delete=models.SET_NULL, related_name='quotes', null=True)
+    poc = models.ForeignKey('client.POC', on_delete=models.SET_NULL, related_name='quotes', null=True)
     
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name='authored_quotes', null=True)
@@ -79,6 +80,13 @@ class Quote(models.Model):
     sub_total = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
     tax_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
     total_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+
+    # Cost and invoicing summary
+    total_cost = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    in_house_cost = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    outsourced_cost = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    invoiced_sum = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    to_be_invoiced_sum = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -113,9 +121,14 @@ class QuoteItem(models.Model):
     quantity = models.PositiveIntegerField()
     unit = models.CharField(max_length=10, choices=UNIT_CHOICES, default='pieces')
     price_per_unit = models.DecimalField(max_digits=10, decimal_places=2)
+    cost = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     
     # This can be calculated automatically on save
     amount = models.DecimalField(max_digits=15, decimal_places=2, editable=False)
+
+    # Optional tracking numbers
+    po_number = models.CharField(max_length=50, blank=True, null=True)
+    bill_number = models.CharField(max_length=50, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         # Automatically calculate the amount before saving

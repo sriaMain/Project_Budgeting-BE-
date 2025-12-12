@@ -85,12 +85,18 @@ class LoginView(APIView):
         access = data["access"]
         refresh = data["refresh"]
         user_id = refresh.payload.get('user_id')
-        user = User.objects.get(id=user_id)
+        # user_obj = User.objects.get(id=user_id)
+        # user = {"roles": [role.role_name for role in user.roles.all()]}
+        user_obj = User.objects.get(id=user_id)
+        user_data = data["user"]
+        user_data["roles"] = [role.role_name for role in user_obj.roles.all()]
 
         response = Response({
             "message": "Login success",
             "access_token": access, 
-            "is_authenticated": user.is_active,       # 🔥 send access token in JSON
+            "is_authenticated": user_obj.is_active, 
+            "is_admin": user_obj.is_staff,
+            # "name": user.role.role,      # 🔥 send access token in JSON
             "user": data["user"]
         })
 

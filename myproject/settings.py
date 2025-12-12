@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-a6f*$eh4p!6=lh-+h#*)afw4*t^_5c*sp-is_7gq(=y!sxkyv_
 # SECURITY WARNING: don't run with debug turned on in production!
 
 
-# DEBUG = True
+DEBUG = True
 # DEBUG = os.getenv("DEBUG", "False") == "True"
 # ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
 # SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_ME")
@@ -69,11 +69,7 @@ CORS_ALLOWED_ORIGINS = [
    ]
 
 CORS_ALLOW_ALL_ORIGINS = True  # Only allow specified origins
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:3000",
-#     "https://gate-check-lwnp.onrender.com",
-#     "https://s39c9z90-3000.inc1.devtunnels.ms",
-# ]
+
 
 CORS_ALLOW_CREDENTIALS = False
 
@@ -117,7 +113,7 @@ ROOT_URLCONF = 'myproject.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, 'templates')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -185,10 +181,11 @@ USE_I18N = True
 USE_TZ = True
 
 
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
-
 STATIC_URL = 'static/'
+STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -225,13 +222,17 @@ CSRF_COOKIE_SAMESITE = "Lax"
 
     
 
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = "smtp.gmail.com"
-EMAIL_PORT = 587
-EMAIL_HOST_USER = "vanumushashidhar@gmail.com"
-EMAIL_HOST_PASSWORD = "qtye gvwm puhm twsa"   # DO NOT commit to repo
-EMAIL_USE_TLS = True
-DEFAULT_FROM_EMAIL = "Your App <no-reply@yourdomain.com>"
+# EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+# EMAIL_HOST = "smtp.gmail.com"
+# EMAIL_PORT = 587
+# EMAIL_HOST_USER = "vanumushashidhar@gmail.com"
+# EMAIL_HOST_PASSWORD = "qtye gvwm puhm twsa"   # DO NOT commit to repo
+# EMAIL_USE_TLS = True
+# DEFAULT_FROM_EMAIL = "Your App <no-reply@yourdomain.com>"
+
+
+# Email settings for development (prints emails to console)
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 
 PASSWORD_RESET_OTP_EXPIRY_MINUTES = 2
@@ -241,13 +242,13 @@ AUTH_USER_MODEL = 'accounts.Account'
 from datetime import timedelta 
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     # 'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
 }
 
-
+FRONTEND_BASE_URL = "http://localhost:5173"
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -279,3 +280,17 @@ print("Using Cloudinary for media storage in production.")
 
 # MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
 # STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'teerdavenigedela@gmail.com'
+EMAIL_HOST_PASSWORD = 'vcig blpb lbdg sact'  # Gmail App Password
+DEFAULT_FROM_EMAIL = "teerdavenigedela@gmail.com"
+
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'

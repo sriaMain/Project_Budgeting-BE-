@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Invoice - {{ quote_name }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        < !DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice - {
+                {
+                quote_no
+            }
+        }
+
+        </title><style>body {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            color: #222;
+            margin: 0;
+            padding: 0;
+        }
+
+        .top-bar {
+            background: linear-gradient(90deg, #3a8dde 0%, #005fa3 100%);
+            color: #fff;
+            padding: 10px 18px 6px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo img {
+            width: 80px;
+        }
+
+        .company-details {
+            text-align: right;
+            font-size: 11px;
+        }
+
+        .invoice-title {
+            color: #fff;
+            font-size: 20px;
+            font-weight: bold;
+            margin-top: 0;
+            letter-spacing: 1px;
+            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+        }
+
+        .section {
+            padding: 8px 18px 0 18px;
+        }
+
+        .billed-to,
+        .invoice-meta {
+            display: inline-block;
+            vertical-align: top;
+            width: 48%;
+        }
+
+        .billed-to {
+            font-size: 12px;
+        }
+
+        .invoice-meta {
+            text-align: right;
+            font-size: 12px;
+        }
+
+        .meta-label {
+            color: #888;
+        }
+
+        .table-section {
+            padding: 6px 18px 0 18px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 4px;
+        }
+
+        th,
+        td {
+            border: 1px solid #e0e0e0;
+            padding: 5px 6px;
+            text-align: left;
+        }
+
+        th {
+            background: #eaf3fb;
+            font-weight: bold;
+            color: #005fa3;
+        }
+
+        .summary-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 0 18px 0 18px;
+            margin-top: 6px;
+        }
+
+        .summary-table {
+            width: 220px;
+            margin-left: auto;
+            font-size: 12px;
+        }
+
+        .summary-table td,
+        .summary-table th {
+            border: none;
+            padding: 2px 4px;
+        }
+
+        .summary-label {
+            color: #222;
+            font-weight: bold;
+        }
+
+        .summary-value {
+            text-align: right;
+        }
+
+        .footer {
+            width: 100%;
+            padding: 4px 18px;
+            font-size: 11px;
+            color: #888;
+            border-top: 1px solid #e0e0e0;
+            margin-top: 10px;
+        }
+
+        .terms {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #555;
+        }
+
+        .amount-in-words {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #555;
+        }
+
+        .totals {
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .summary-title {
+            font-size: 15px;
+            font-weight: bold;
+            margin-bottom: 4px;
+            color: #3a8dde;
+        }
+
+        .extra-summary {
+            margin-top: 8px;
+            font-size: 12px;
+        }
+
+        @media print {
+            .footer {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="top-bar">
+        <div class="logo">
+            <img src="https://www.sriainfotech.com/assets/img/logo.png" alt="Sria Infotech" />
+        </div>
+        <div class="invoice-title">INV-{{ quote_no|stringformat:"06d" }}</div>
+        <div class="company-details">
+            <strong>SRIA INFOTECH PRIVATE LTD</strong><br>
+            1ST FLOOR, 1-121/S3, SURVEY NO 63 PART<br>
+            BEHIND HOTEL SITARA GRAND MIYAPUR<br>
+            RANGAREDDI, Hyderabad, Telangana, India, 500049.<br>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="billed-to">
+            <strong>Billed To:</strong><br>
+            {{ client_name }}<br>
+            {{ client_address }}<br>
+            {% if client_gstin %}GSTIN: {{ client_gstin }}<br>{% endif %}
+            {% if client_state %}Place of supply: {{ client_state }}<br>{% endif %}
+        </div>
+        <div class="invoice-meta">
+            <span class="meta-label">Invoice Date:</span> {{ date_of_issue }}<br>
+            <span class="meta-label">Due Date:</span> {{ due_date }}<br>
+            <span class="meta-label">GSTIN:</span> 36ABICS3346M1ZV<br>
+        </div>
+    </div>
+
+    <div class="table-section">
+        <table>
+            <tr>
+                <th>Description</th>
+                <th>Quantity</th>
+                <th>Unit</th>
+                <th>Unit Price</th>
+                <th>Taxes</th>
+                <th>Amount</th>
+            </tr>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.description }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>{{ item.unit }}</td>
+                <td>{{ item.price_per_unit }}</td>
+                <td>SGST 9%, CGST 9%</td>
+                <td>{{ item.amount }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <div class="summary-section" style="margin-top: 18px;">
+        <table style="width: 100%; border: none; font-size: 14px;">
+            <tr>
+                <td style="padding: 4px 8px; color: #888;">Subtotal</td>
+                <td style="padding: 4px 8px; text-align: right;">{{ sub_total }}</td>
+                <td style="padding: 4px 8px; color: #888;">Total</td>
+                <td style="padding: 4px 8px; text-align: right;">{{ total_amount }}</td>
+            </tr>
+            <tr>
+                <td style="padding: 4px 8px; color: #888;">Tax (%)</td>
+                <td style="padding: 4px 8px; text-align: right;">{{ tax_percentage }}</td>
+                <td style="padding: 4px 8px; color: #888;">In-house</td>
+                <td style="padding: 4px 8px; text-align: right;">{{ in_house_cost }}</td>
+            </tr>
+            <tr>
+                <td style="padding: 4px 8px; color: #888;">Total(INR)</td>
+                <td style="padding: 4px 8px; text-align: right;">{{ total_amount }}</td>
+                <td style="padding: 4px 8px; color: #888;">Out-Sourced</td>
+                <td style="padding: 4px 8px; text-align: right;">{{ outsourced_cost }}</td>
+            </tr>
+            <tr>
+                <td style="padding: 4px 8px; color: #888;">Invoiced Sum(INR)</td>
+                <td style="padding: 4px 8px; text-align: right;">{{ invoiced_sum }}</td>
+                <td style="padding: 4px 8px; color: #888;">To be Voiced (INR)</td>
+                <td style="padding: 4px 8px; text-align: right;">{{ to_be_invoiced_sum }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <div><strong>Payment terms:</strong> Immediate Payment</div>
+        <div style="margin-top: 8px;"><strong>Payment Communication:</strong> INV-{{ quote_no|stringformat:"06d" }}
+        </div>
+        <div class="terms">Terms &amp; Conditions: <a
+                href="https://www.sriainfotech.com/">https://www.sriainfotech.com/</a></div>
+    </div>
+
+    <div class="footer">
+        hr@sriainfotech.com &nbsp; | &nbsp; <a href="https://www.sriainfotech.com/">www.sriainfotech.com</a>
+        <span style="float:right;">Page 1 / 1</span>
+    </div>
+</body>
+
+<!-- Duplicate summary and HTML removed -->

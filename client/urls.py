@@ -7,6 +7,7 @@ from .views import (
     PointOfContactListCreateAPIView,
     PointOfContactDetailAPIView,
     CompanyPOCListView,
+    # AllPOCsWithCompanyAPIView,
 )
 
 urlpatterns = [
@@ -21,6 +22,7 @@ urlpatterns = [
     path("pocs/", PointOfContactListCreateAPIView.as_view(), name="poc-list-create"),
     path("pocs/<int:pk>/", PointOfContactDetailAPIView.as_view(), name="poc-detail"),
 
-    # New URL for getting POCs by company
+    # URL for getting POCs by company or all companies (company_id is optional)
+    path("client/pocs/", CompanyPOCListView.as_view(), name="all-company-poc-list"),
     path("client/<int:company_id>/pocs/", CompanyPOCListView.as_view(), name="company-poc-list"),
 ]

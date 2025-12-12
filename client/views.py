@@ -338,20 +338,46 @@ class PointOfContactDetailAPIView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+
 class CompanyPOCListView(APIView):
     """
-    API view to retrieve all Points of Contact for a specific company.
+    API view to retrieve POCs for a specific company or all companies in a flat list.
     """
     permission_classes = [All]
 
-    def get(self, request, company_id):
-        # Ensure the company exists
-        company = get_object_or_404(Company, pk=company_id)
-        
-        # Filter POCs by the company
-        pocs = POC.objects.filter(company=company)
-        
-        # Serialize the results
-        serializer = PointOfContactSerializer(pocs, many=True)
-        
-        return Response(serializer.data, status=status.HTTP_200_OK)
+    def get(self, request, company_id=None):
+        if company_id is not None:
+            company = get_object_or_404(Company, pk=company_id)
+            pocs = POC.objects.filter(company=company)
+            poc_list = []
+            for poc in pocs:
+                poc_list.append({
+                    "id": poc.id,
+                    "company_name": company.company_name,
+                    "poc_name": getattr(poc, 'name', getattr(poc, 'poc_name', None)),
+                    "designation": poc.designation,
+                    "poc_mobile": getattr(poc, 'mobile', getattr(poc, 'poc_mobile', None)),
+                    "poc_email": getattr(poc, 'email', getattr(poc, 'poc_email', None)),
+                })
+            company_data = CompanySerializer(company).data
+            company_data["pocs"] = poc_list
+            return Response(company_data, status=status.HTTP_200_OK)
+        else:
+            companies = Company.objects.all()
+            result = []
+            for company in companies:
+                company_data = CompanySerializer(company).data
+                pocs = POC.objects.filter(company=company)
+                poc_list = []
+                for poc in pocs:
+                    poc_list.append({
+                        "id": poc.id,
+                        "company_name": company.company_name,
+                        "poc_name": getattr(poc, 'name', getattr(poc, 'poc_name', None)),
+                        "designation": poc.designation,
+                        "poc_mobile": getattr(poc, 'mobile', getattr(poc, 'poc_mobile', None)),
+                        "poc_email": getattr(poc, 'email', getattr(poc, 'poc_email', None)),
+                    })
+                company_data["pocs"] = poc_list
+                result.append(company_data)
+            return Response(result, status=status.HTTP_200_OK)
