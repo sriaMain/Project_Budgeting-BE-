@@ -89,10 +89,11 @@ INSTALLED_APPS = [
     'accounts',
     'rest_framework_simplejwt',
     'corsheaders',
-    'module',
+    # 'module',
     'product_group',
     'roles',
     'client',
+    'Project',
     
 ]
 
