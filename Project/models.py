@@ -50,49 +50,27 @@ class Project(models.Model):
 		return f"{self.project_name} ({self.project_no})"
 
 
+
+
 class ProjectBudget(models.Model):
-	project = models.OneToOneField(Project, on_delete=models.CASCADE, related_name='budget')
-	use_quoted_amounts = models.BooleanField(default=True)
-	total_hours = models.PositiveIntegerField(null=True, blank=True)
-	total_budget = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-	bills_and_expenses = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-	currency = models.CharField(max_length=10, choices=Project.CURRENCY_CHOICES, default='INR')
-	created_at = models.DateTimeField(auto_now_add=True)
-	modified_at = models.DateTimeField(auto_now=True)
+    project = models.OneToOneField(Project, on_delete=models.SET_NULL, null=True, related_name='budget')
+    use_quoted_amounts = models.BooleanField(default=True)
+    total_hours = models.PositiveIntegerField(null=True, blank=True)
+    total_budget = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    bills_and_expenses = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=10, default='INR')
 
+    def apply_quoted_amounts(self):
+        quote = self.project.created_from_quotation
+        if not quote:
+            raise ValidationError("Quotation is required")
 
-	def clean(self):
-		if not self.use_quoted_amounts:
-			if self.total_hours is None or self.total_budget is None:
-				raise ValidationError(_('Total hours and total budget must be filled when setting manually.'))
-		else:
-			# If using quoted amounts, these should be fetched from the related quotation
-			if not self.project.created_from_quotation:
-				raise ValidationError(_('No quotation linked to fetch quoted amounts.'))
+        self.total_hours = sum(
+            item.quantity for item in quote.items.all()
+            if item.unit == 'hours'
+        )
+        self.total_budget = quote.total_amount
+        self.bills_and_expenses = quote.in_house_cost + quote.outsourced_cost
+        self.currency = getattr(quote, 'currency', None) or self.project.currency
+		# self.currency = getattr(quote, 'currency', None) or self.project.currency
 
-	def fetch_quoted_amounts(self):
-		# Fetch from quotation if available
-		quotation = self.project.created_from_quotation
-		if quotation:
-			# Sum hours from related QuoteItems with unit='hours'
-			items = getattr(quotation, 'items', None)
-			if items is not None:
-				self.total_hours = sum(item.quantity for item in items.all() if getattr(item, 'unit', None) == 'hours')
-			else:
-				self.total_hours = 0
-			# Use total_amount from Quote for total_budget
-			self.total_budget = getattr(quotation, 'total_amount', 0)
-			# Use in_house_cost + outsourced_cost for bills_and_expenses
-			in_house_cost = getattr(quotation, 'in_house_cost', 0)
-			outsourced_cost = getattr(quotation, 'outsourced_cost', 0)
-			try:
-				self.bills_and_expenses = in_house_cost + outsourced_cost
-			except Exception:
-				self.bills_and_expenses = 0
-			self.currency = getattr(quotation, 'currency', 'INR')
-		else:
-			raise ValidationError(_('No quotation linked to fetch quoted amounts.'))
-
-	def save(self, *args, **kwargs):
-		self.full_clean()
-		super().save(*args, **kwargs)

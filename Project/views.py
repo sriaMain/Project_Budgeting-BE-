@@ -4,95 +4,234 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.permissions import IsAuthenticated
 from .models import Project, ProjectBudget
-from .serializers import ProjectSerializer, ProjectBudgetSerializer
+from .serializers import ProjectCreateSerializer, ProjectBudgetSerializer
 
 
 
-# Single CBV for all CRUD operations for Project
+
 class ProjectAPIView(APIView):
-	permission_classes = [permissions.IsAuthenticated]
-	authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
-	def get(self, request, pk=None):
-		if pk is not None:
-			try:
-				project = Project.objects.get(pk=pk)
-			except Project.DoesNotExist:
-				return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-			serializer = ProjectSerializer(project)
-			print('DEBUG Project GET:', serializer.data)  # Debug print
-			return Response(serializer.data)
-		else:
-			projects = Project.objects.all()
-			serializer = ProjectSerializer(projects, many=True)
-			print('DEBUG Project LIST:', serializer.data)  # Debug print
-			return Response(serializer.data)
+    # CREATE PROJECT
+    # @transaction.atomic
+    def post(self, request):
+        serializer = ProjectCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        project = serializer.save()
 
-	def post(self, request, pk=None):
-		serializer = ProjectSerializer(data=request.data)
-		if serializer.is_valid():
-			serializer.save()
-			return Response(serializer.data, status=status.HTTP_201_CREATED)
-		return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "message": "Project created successfully",
+                "project": ProjectCreateSerializer(project).data
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+    # READ PROJECT / LIST PROJECTS
+    def get(self, request, project_id=None):
+        if project_id:
+            try:
+                project = Project.objects.get(project_no=project_id)
+            except Project.DoesNotExist:
+                return Response(
+                    {"error": "Project not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            return Response(
+                ProjectCreateSerializer(project).data,
+                status=status.HTTP_200_OK
+            )
+
+        projects = Project.objects.all().order_by('-created_at')
+        return Response(
+            ProjectCreateSerializer(projects, many=True).data,
+            status=status.HTTP_200_OK
+        )
+
+    # UPDATE PROJECT
+
+    def put(self, request, project_id):
+        try:
+            project = Project.objects.get(project_no=project_id)
+        except Project.DoesNotExist:
+            return Response(
+                {"error": "Project not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = ProjectCreateSerializer(
+            project,
+            data=request.data,
+            partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        project = serializer.save()
+
+        return Response(
+            {
+                "message": "Project updated successfully",
+                "project": ProjectCreateSerializer(project).data
+            },
+            status=status.HTTP_200_OK
+        )
+
+    # DELETE PROJECT
+    # @transaction.atomic
+    def delete(self, request, project_id):
+        try:
+            project = Project.objects.get(project_no=project_id)
+        except Project.DoesNotExist:
+            return Response(
+                {"error": "Project not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        project.delete()
+        return Response(
+            {"message": "Project deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT
+        )
 
 
+class ProjectBudgetCRUDAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
-# Single CBV for all CRUD operations for ProjectBudget
+    # CREATE / UPDATE BUDGET
+    # @transaction.atomic
+    def post(self, request, project_id):
+        try:
+            project = Project.objects.get(project_no=project_id)
+        except Project.DoesNotExist:
+            return Response(
+                {"error": "Project not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        budget, created = ProjectBudget.objects.get_or_create(project=project)
+
+        serializer = ProjectBudgetSerializer(
+            budget,
+            data=request.data,
+            partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        budget = serializer.save()
+
+        if budget.use_quoted_amounts:
+            budget.apply_quoted_amounts()
+            budget.save()
+
+        return Response(
+            {
+                "message": "Project budget saved successfully",
+                "budget": ProjectBudgetSerializer(budget).data
+            },
+            status=status.HTTP_200_OK
+        )
+
+    # READ BUDGET
+    def get(self, request, project_id):
+        try:
+            budget = ProjectBudget.objects.get(project__project_no=project_id)
+        except ProjectBudget.DoesNotExist:
+            return Response(
+                {"error": "Budget not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return Response(
+            ProjectBudgetSerializer(budget).data,
+            status=status.HTTP_200_OK
+        )
+
+    # DELETE BUDGET
+    # @transaction.atomic
+    def delete(self, request, project_id):
+        try:
+            budget = ProjectBudget.objects.get(project__project_no=project_id)
+        except ProjectBudget.DoesNotExist:
+            return Response(
+                {"error": "Budget not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        budget.delete()
+        return Response(
+            {"message": "Budget deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT
+        )
+    
+
 class ProjectBudgetAPIView(APIView):
-	permission_classes = [permissions.IsAuthenticated]
-	authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
+    # CREATE / UPDATE BUDGET
+    # @transaction.atomic
+    def post(self, request, project_no):
+        try:
+            project = Project.objects.get(project_no=project_no)
+        except Project.DoesNotExist:
+            return Response(
+                {"error": "Project not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-	def get(self, request, project_no=None):
-		if project_no is not None:
-			try:
-				budget = ProjectBudget.objects.get(project__project_no=project_no)
-			except ProjectBudget.DoesNotExist:
-				return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-			serializer = ProjectBudgetSerializer(budget)
-			return Response(serializer.data)
-		else:
-			budgets = ProjectBudget.objects.all()
-			serializer = ProjectBudgetSerializer(budgets, many=True)
-			return Response(serializer.data)
+        budget, created = ProjectBudget.objects.get_or_create(project=project)
 
-	def post(self, request, project_no=None):
-		data = request.data.copy()
-		if project_no is not None:
-			# Set the project by project_no (which is the PK)
-			try:
-				project = Project.objects.get(project_no=project_no)
-				data['project'] = project.project_no
-			except Project.DoesNotExist:
-				return Response({'detail': 'Project not found.'}, status=status.HTTP_404_NOT_FOUND)
-		serializer = ProjectBudgetSerializer(data=data)
-		if serializer.is_valid():
-			serializer.save()
-			return Response(serializer.data, status=status.HTTP_201_CREATED)
-		return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer = ProjectBudgetSerializer(
+            budget,
+            data=request.data,
+            partial=True
+        )
+        serializer.is_valid(raise_exception=True)
 
-	def put(self, request, project_no=None):
-		if project_no is None:
-			return Response({'detail': 'Method "PUT" not allowed.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
-		try:
-			project = Project.objects.get(project_no=project_no)
-			budget = ProjectBudget.objects.get(project=project)
-		except (Project.DoesNotExist, ProjectBudget.DoesNotExist):
-			return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-		serializer = ProjectBudgetSerializer(budget, data=request.data)
-		if serializer.is_valid():
-			serializer.save()
-			return Response(serializer.data)
-		return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        budget = serializer.save()
 
-	def delete(self, request, project_no=None):
-		if project_no is None:
-			return Response({'detail': 'Method "DELETE" not allowed.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
-		try:
-			project = Project.objects.get(project_no=project_no)
-			budget = ProjectBudget.objects.get(project=project)
-		except (Project.DoesNotExist, ProjectBudget.DoesNotExist):
-			return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-		budget.delete()
-		return Response(status=status.HTTP_204_NO_CONTENT)
+        if budget.use_quoted_amounts:
+            budget.apply_quoted_amounts()
+            budget.save()
+
+        return Response(
+            {
+                "message": "Project budget saved successfully",
+                "budget": ProjectBudgetSerializer(budget).data
+            },
+            status=status.HTTP_200_OK
+        )
+
+    # READ BUDGET
+    def get(self, request, project_no):
+        try:
+            budget = ProjectBudget.objects.get(project__project_no=project_no)
+        except ProjectBudget.DoesNotExist:
+            return Response(
+                {"error": "Budget not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return Response(
+            ProjectBudgetSerializer(budget).data,
+            status=status.HTTP_200_OK
+        )
+
+    # DELETE BUDGET
+    # @transaction.atomic
+    def delete(self, request, project_no):
+        try:
+            budget = ProjectBudget.objects.get(project__project_no=project_no)
+        except ProjectBudget.DoesNotExist:
+            return Response(
+                {"error": "Budget not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        budget.delete()
+        return Response(
+            {"message": "Budget deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT
+        )
