@@ -1,5 +1,6 @@
 from django.urls import path, include
-from .views import ProjectAPIView, ProjectBudgetAPIView, TaskAPIView, TimesheetAPIView, TimesheetEntryAPIView, SubmitTimesheetAPIView
+from .views import (ProjectAPIView, ProjectBudgetAPIView, TaskAPIView,
+ TimesheetAPIView, TimesheetEntryAPIView, SubmitTimesheetAPIView, StartTaskTimerAPIView, PauseTaskTimerAPIView)
 
 urlpatterns = [
     path('projects/', ProjectAPIView.as_view(), name='project-list-create'),
@@ -13,5 +14,8 @@ urlpatterns = [
     path('timesheet/', TimesheetAPIView.as_view(), name='timesheet-list-create'),
     path('timesheet/entry/', TimesheetEntryAPIView.as_view(), name='timesheet-entry-list-create'),
     path('timesheet/submit/', SubmitTimesheetAPIView.as_view(), name='submit-timesheet'),
+    path("tasks/<int:task_id>/timer/start/",StartTaskTimerAPIView.as_view()),
+    path("tasks/<int:task_id>/timer/pause/", PauseTaskTimerAPIView.as_view()),
+        
 
 ]

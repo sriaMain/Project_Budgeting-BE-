@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry
+from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog
 
 
 class ProjectBudgetSerializer(serializers.ModelSerializer):
@@ -26,6 +26,58 @@ class ProjectBudgetSerializer(serializers.ModelSerializer):
                     )
         return data
     
+# class ProjectCreateSerializer(serializers.ModelSerializer):
+#     budget = ProjectBudgetSerializer(required=False)
+
+#     class Meta:
+#         model = Project
+#         fields = (
+#             'status',
+#             'project_no',
+#             'project_name',
+#             'project_type',
+#             'start_date',
+#             'end_date',
+#             'project_manager',
+#             'created_from_quotation',
+#             'budget',
+    
+#         )
+
+#     def create(self, validated_data):
+#         # Restrict project creation only from confirmed quotations
+#         quotation = validated_data.get('created_from_quotation')
+#         budget_data = validated_data.get('budget', {})
+#         if quotation and hasattr(quotation, 'status'):
+#             if quotation.status != 'Confirmed':
+#                 raise serializers.ValidationError({
+#                     'error': 'Project can only be created from a Confirmed quotation.'
+#                 })
+#         # If use_quoted_amounts is True, quotation must be present
+#         if budget_data and budget_data.get('use_quoted_amounts') and not quotation:
+#             raise serializers.ValidationError(
+#                 'Quotation is required when using quoted amounts.'
+#             )
+#         budget_data = validated_data.pop('budget', None)
+#         project = Project.objects.create(**validated_data)
+#         if budget_data:
+#             budget = ProjectBudget.objects.create(
+#                 project=project,
+#                 **budget_data
+#             )
+#             if budget.use_quoted_amounts:
+#                 budget.apply_quoted_amounts()
+#                 budget.save()
+#         return project
+#     def validate (self, data):
+#         start_date = data.get('start_date')
+#         end_date = data.get('end_date')
+#         if start_date and end_date and end_date < start_date:
+#             raise serializers.ValidationError(
+#                 "End date cannot be before start date."
+#             )
+#         return data
+
 class ProjectCreateSerializer(serializers.ModelSerializer):
     budget = ProjectBudgetSerializer(required=False)
 
@@ -41,25 +93,37 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             'project_manager',
             'created_from_quotation',
             'budget',
-    
         )
 
-    def create(self, validated_data):
-        # Restrict project creation only from confirmed quotations
-        quotation = validated_data.get('created_from_quotation')
-        budget_data = validated_data.get('budget', {})
-        if quotation and hasattr(quotation, 'status'):
-            if quotation.status != 'Confirmed':
-                raise serializers.ValidationError({
-                    'error': 'Project can only be created from a Confirmed quotation.'
-                })
-        # If use_quoted_amounts is True, quotation must be present
-        if budget_data and budget_data.get('use_quoted_amounts') and not quotation:
+    def validate(self, data):
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+
+        if start_date and end_date and end_date < start_date:
             raise serializers.ValidationError(
-                'Quotation is required when using quoted amounts.'
+                "End date cannot be before start date."
             )
+
+        quotation = data.get('created_from_quotation')
+        if quotation:
+            if Project.objects.filter(
+                created_from_quotation=quotation
+            ).exists():
+                raise serializers.ValidationError({
+                    "created_from_quotation": "A project already exists for this quotation."
+                })
+
+            if hasattr(quotation, 'status') and quotation.status != 'Confirmed':
+                raise serializers.ValidationError({
+                    "created_from_quotation": "Project can only be created from a Confirmed quotation."
+                })
+
+        return data
+
+    def create(self, validated_data):
         budget_data = validated_data.pop('budget', None)
         project = Project.objects.create(**validated_data)
+
         if budget_data:
             budget = ProjectBudget.objects.create(
                 project=project,
@@ -68,16 +132,8 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             if budget.use_quoted_amounts:
                 budget.apply_quoted_amounts()
                 budget.save()
-        return project
-    def validate (self, data):
-        start_date = data.get('start_date')
-        end_date = data.get('end_date')
-        if start_date and end_date and end_date < start_date:
-            raise serializers.ValidationError(
-                "End date cannot be before start date."
-            )
-        return data
 
+        return project
     
 class TaskSerializer(serializers.ModelSerializer):
 
@@ -183,3 +239,22 @@ class TimesheetSerializer(serializers.ModelSerializer):
             'id', 'week_start', 'week_end',
             'status', 'entries'
         ]
+
+
+
+class TaskTimerLogSerializer(serializers.ModelSerializer):
+    task_title = serializers.CharField(source="task.title", read_only=True)
+
+    class Meta:
+        model = TaskTimerLog
+        fields = [
+            "id",
+            "task",
+            "task_title",
+            "start_time",
+            "end_time",
+            "duration_minutes",
+            "is_active",
+            "created_at",
+        ]
+        read_only_fields = fields

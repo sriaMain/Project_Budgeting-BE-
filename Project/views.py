@@ -3,13 +3,16 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
-from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry
+from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog
 from .serializers import (ProjectCreateSerializer, ProjectBudgetSerializer, TaskSerializer,
- TimesheetEntrySerializer, TimesheetSerializer)
+ TimesheetEntrySerializer, TimesheetSerializer, TaskTimerLogSerializer)
 from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
 from django.db.models import Sum
+from django.db.models import F
+
+
 
 
 
@@ -299,7 +302,32 @@ class TaskAPIView(APIView):
             TaskSerializer(tasks, many=True).data,
             status=status.HTTP_200_OK
         )
+    
 
+    def put(self, request, task_id):
+        try:
+            task = Task.objects.get(id=task_id)
+        except Task.DoesNotExist:
+            return Response(
+                {"error": "Task not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = TaskSerializer(
+            task,
+            data=request.data,
+            partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        task = serializer.save(modified_by=request.user)
+
+        return Response(
+            {
+                "message": "Task updated successfully",
+                "task": TaskSerializer(task).data
+            },
+            status=status.HTTP_200_OK
+        )
 
 
     def delete(self, request, task_id):
@@ -346,7 +374,9 @@ class TimesheetAPIView(APIView):
                 {
                     "id": task.id,
                     "title": task.title,
-                    "allocated_hours": task.allocated_hours
+                    "allocated_hours": float(task.allocated_hours),
+                    "consumed_hours": float(task.consumed_hours),
+                    "remaining_hours": float(task.remaining_hours),
                 } for task in tasks
             ]
         })
@@ -366,58 +396,7 @@ class TimesheetEntryAPIView(APIView):
             TimesheetEntrySerializer(entries, many=True).data
         )
 
-    # def post(self, request):
-    #     task_id = request.data.get("task")
-    #     date = request.data.get("date")
-    #     hours = request.data.get("hours")
-
-    #     if not date:
-    #         return Response(
-    #             {"error": "Date is required"},
-    #             status=400
-    #         )
-
-    #     entry_date = timezone.datetime.fromisoformat(date).date()
-    #     week_start, week_end = get_week_range(entry_date)
-
-    #     # ✅ AUTO-CREATE TIMESHEET
-    #     timesheet, _ = Timesheet.objects.get_or_create(
-    #         user=request.user,
-    #         week_start=week_start,
-    #         defaults={"week_end": week_end}
-    #     )
-
-    #     if timesheet.status != "draft":
-    #         return Response(
-    #             {"error": "Timesheet already submitted"},
-    #             status=400
-    #         )
-
-    #     task = Task.objects.get(id=task_id)
-
-    #     is_employee = request.user.roles.filter(role_name="Employee").exists()
-    #     is_manager = request.user.roles.filter(
-    #         role_name__in=["Manager", "Project Manager", "Admin"]
-    #     ).exists()
-
-    #     # 🔒 Permission rules
-    #     if is_employee and task.assigned_to != request.user:
-    #         return Response(
-    #             {"error": "Task not assigned to you"},
-    #             status=403
-    #         )
-
-    #     TimesheetEntry.objects.update_or_create(
-    #         timesheet=timesheet,
-    #         task=task,
-    #         date=entry_date,
-    #         defaults={"hours": hours}
-    #     )
-
-    #     return Response({
-    #         "message": "Time entry saved",
-    #         "timesheet_id": timesheet.id
-    #     })
+    
 
 
     def post(self, request):
@@ -555,3 +534,282 @@ class SubmitTimesheetAPIView(APIView):
 
         return Response({"message": "Timesheet submitted successfully"})
 
+
+
+class StartTaskTimerAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def post(self, request, task_id):
+        user = request.user
+
+        task = Task.objects.get(id=task_id)
+
+        # 🔒 Only one active timer per user
+        if TaskTimerLog.objects.filter(user=user, is_active=True).exists():
+            return Response(
+                {"error": "You already have an active timer"},
+                status=400
+            )
+
+        # 🔒 Employee must be assigned
+        is_employee = user.roles.filter(role_name="Employee").exists()
+        if is_employee and task.assigned_to != user:
+            return Response(
+                {"error": "Task not assigned to you"},
+                status=403
+            )
+
+        # Resume feature: if a previous timer exists for this user and task, and is not active, allow resuming (create a new timer log)
+        previous_timer = TaskTimerLog.objects.filter(user=user, task=task, is_active=False).order_by('-end_time').first()
+        if previous_timer:
+            TaskTimerLog.objects.create(
+                task=task,
+                user=user,
+                start_time=timezone.now(),
+                is_active=True
+            )
+            task.status = "in_progress"
+            task.save()
+            return Response({
+                "message": "Timer resumed for this task. You can pause it when needed.",
+                "action": "resumed"
+            })
+        else:
+            TaskTimerLog.objects.create(
+                task=task,
+                user=user,
+                start_time=timezone.now(),
+                is_active=True
+            )
+            task.status = "in_progress"
+            task.save()
+            return Response({
+                "message": "Timer started for this task. You can pause it when needed.",
+                "action": "started"
+            })
+
+
+from .utils import get_week_range
+
+
+class PauseTaskTimerAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    # def post(self, request, task_id):
+    #     user = request.user
+
+    #     task = Task.objects.get(id=task_id)
+
+    #     # 🔹 Get active timer
+    #     try:
+    #         timer = TaskTimerLog.objects.get(
+    #             task=task,
+    #             user=user,
+    #             is_active=True
+    #         )
+    #     except TaskTimerLog.DoesNotExist:
+    #         return Response(
+    #             {"error": "No active timer found"},
+    #             status=400
+    #         )
+
+    #     # 🔹 Stop timer
+    #     timer.end_time = timezone.now()
+    #     duration_minutes = int(
+    #         (timer.end_time - timer.start_time).total_seconds() / 60
+    #     )
+    #     timer.duration_minutes = duration_minutes
+    #     timer.is_active = False
+    #     timer.save()
+
+    #     if duration_minutes == 0:
+    #         return Response(
+    #             {"error": "Tracked time too short"},
+    #             status=400
+    #         )
+
+    #     worked_hours = Decimal(duration_minutes) / Decimal("60")
+    #     entry_date = timer.start_time.date()
+
+    #     # 🔹 Week calculation
+    #     week_start, week_end = get_week_range(entry_date)
+
+    #     timesheet, _ = Timesheet.objects.get_or_create(
+    #         user=user,
+    #         week_start=week_start,
+    #         defaults={"week_end": week_end}
+    #     )
+
+    #     if timesheet.status != "draft":
+    #         return Response(
+    #             {"error": "Timesheet already submitted"},
+    #             status=400
+    #         )
+
+    #     # 🔹 DAILY LIMIT (8 hrs)
+    #     daily_hours = TimesheetEntry.objects.filter(
+    #         timesheet=timesheet,
+    #         date=entry_date
+    #     ).aggregate(total=Sum("hours"))["total"] or Decimal("0")
+
+    #     if daily_hours + worked_hours > Decimal("8"):
+    #         return Response(
+    #             {"error": "Daily limit exceeded (8 hrs)"},
+    #             status=400
+    #         )
+
+    #     # 🔹 WEEKLY LIMIT (40 hrs)
+    #     weekly_hours = TimesheetEntry.objects.filter(
+    #         timesheet=timesheet
+    #     ).aggregate(total=Sum("hours"))["total"] or Decimal("0")
+
+    #     if weekly_hours + worked_hours > Decimal("40"):
+    #         return Response(
+    #             {"error": "Weekly limit exceeded (40 hrs)"},
+    #             status=400
+    #         )
+
+    #     # 🔹 TASK ALLOCATED HOURS
+    #     task_used = task.time_entries.aggregate(
+    #         total=Sum("hours")
+    #     )["total"] or Decimal("0")
+
+    #     if (
+    #         user.roles.filter(role_name="Employee").exists()
+    #         and task_used + worked_hours > task.allocated_hours
+    #     ):
+    #         return Response(
+    #             {"error": "Allocated task hours exceeded"},
+    #             status=400
+    #         )
+
+    #     # 🔹 SAVE TIMESHEET ENTRY
+    #     TimesheetEntry.objects.update_or_create(
+    #         timesheet=timesheet,
+    #         task=task,
+    #         date=entry_date,
+    #         defaults={
+    #             "hours": F("hours") + worked_hours
+    #         }
+    #     )
+
+    #     # 🔹 UPDATE TASK STATUS
+    #     if task.remaining_hours <= 0:
+    #         task.status = "completed"
+    #     else:
+    #         task.status = "in_progress"
+    #     task.save()
+
+    #     return Response({
+    #         "message": "Timer paused & time logged",
+    #         "worked_hours": float(worked_hours),
+    #         "remaining_hours": float(task.remaining_hours),
+    #     })
+
+
+    def post(self, request, task_id):
+        user = request.user
+        task = Task.objects.get(id=task_id)
+
+        # Debug: Print all TaskTimerLog entries for this user and task
+        debug_logs = list(TaskTimerLog.objects.filter(user=user, task=task).values())
+        print("DEBUG TaskTimerLog entries for user and task:", debug_logs)
+        try:
+            timer = TaskTimerLog.objects.get(
+                task=task,
+                user=user,
+                is_active=True
+            )
+        except TaskTimerLog.DoesNotExist:
+            # Also print all active timers for this user
+            active_timers = list(TaskTimerLog.objects.filter(user=user, is_active=True).values())
+            print("DEBUG Active timers for user:", active_timers)
+            return Response(
+                {"error": "No active timer found", "debug": {"all_for_task": debug_logs, "active_for_user": active_timers}},
+                status=400
+            )
+
+        # ⏸ Pause timer
+        pause_time = timezone.now()
+        timer.end_time = pause_time
+
+        duration_minutes = int(
+            (pause_time - timer.start_time).total_seconds() / 60
+        )
+        timer.duration_minutes = duration_minutes
+        timer.is_active = False
+        timer.save()
+
+        worked_hours = Decimal(duration_minutes) / Decimal("60")
+        entry_date = timer.start_time.date()
+
+        # ⏱ Timesheet logic (same as before)
+        week_start, week_end = get_week_range(entry_date)
+
+        timesheet, _ = Timesheet.objects.get_or_create(
+            user=user,
+            week_start=week_start,
+            defaults={"week_end": week_end}
+        )
+
+        entry, created = TimesheetEntry.objects.get_or_create(
+            timesheet=timesheet,
+            task=task,
+            date=entry_date,
+            defaults={"hours": worked_hours}
+        )
+        if not created:
+            entry.hours = entry.hours + worked_hours
+            entry.save()
+
+        # 🔄 Update task status
+        task.refresh_from_db()
+        task.status = "completed" if task.remaining_hours <= 0 else "in_progress"
+        task.save()
+
+        # 📊 Totals
+        daily_total = TimesheetEntry.objects.filter(
+            timesheet=timesheet,
+            date=entry_date
+        ).aggregate(total=Sum("hours"))["total"] or 0
+
+        weekly_total = TimesheetEntry.objects.filter(
+            timesheet=timesheet
+        ).aggregate(total=Sum("hours"))["total"] or 0
+
+        # ⚠️ Warnings
+        warnings = []
+        if daily_total > 8:
+            warnings.append("Daily hours exceeded (8 hrs)")
+        if weekly_total > 40:
+            warnings.append("Weekly hours exceeded (40 hrs)")
+        if task.remaining_hours <= 0:
+            warnings.append("Task fully utilized")
+
+        return Response({
+            "message": "Timer paused successfully",
+            "task": {
+                "id": task.id,
+                "title": task.title,
+                "status": task.status,
+            },
+            "timer": {
+                "started_at": timer.start_time,
+                "paused_at": pause_time,
+                "worked_minutes": duration_minutes,
+                "worked_hours": float(worked_hours),
+            },
+            "timesheet": {
+                "date": entry_date,
+                "daily_total_hours": float(daily_total),
+                "weekly_total_hours": float(weekly_total),
+            },
+            "task_hours": {
+                "allocated": float(task.allocated_hours),
+                "consumed": float(task.consumed_hours),
+                "remaining": float(task.remaining_hours),
+            },
+            "warnings": warnings
+        })
