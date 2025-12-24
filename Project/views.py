@@ -23,7 +23,7 @@ class ProjectAPIView(APIView):
     def post(self, request):
         serializer = ProjectCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        project = serializer.save(created_by=request.user)
+        project = serializer.save()
 
         return Response(
             {
@@ -72,7 +72,7 @@ class ProjectAPIView(APIView):
             partial=True
         )
         serializer.is_valid(raise_exception=True)
-        project = serializer.save(modified_by=request.user)
+        project = serializer.save()
 
         return Response(
             {
@@ -554,3 +554,4 @@ class SubmitTimesheetAPIView(APIView):
         timesheet.save()
 
         return Response({"message": "Timesheet submitted successfully"})
+
