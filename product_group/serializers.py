@@ -201,6 +201,68 @@ class QuoteSerializer(serializers.ModelSerializer):
         return instance
 
 
+    # def validate(self, data):
+    #     # 1️⃣ Enforce items only on CREATE
+    #     if not self.instance:
+    #         items = data.get('items')
+    #         if not items or len(items) == 0:
+    #             raise serializers.ValidationError({
+    #                 "error": "At least one product/service must be added to create a quotation."
+    #             })
+
+    #     # 2️⃣ Status transition rules (only on UPDATE)
+    #     if self.instance:
+    #         current_status = self.instance.status
+    #         new_status = data.get('status', current_status)
+
+    #         if current_status == 'Confirmed' and new_status in [
+    #             'Oppurtunity', 'Scoping', 'Proposal', 'Cancelled', 'Closed', 'Rejected'
+    #         ]:
+    #             raise serializers.ValidationError({
+    #                 "error": (
+    #                     "Once a quotation is Confirmed, it cannot be moved back "
+    #                     "to Opportunity, Scoping, or Proposal."
+    #                 )
+    #             })
+
+    #     return data
+
+
+    def validate(self, data):
+    # 1️⃣ Enforce valid items only on CREATE
+        if not self.instance:
+            items = data.get('items', [])
+
+            valid_items = [
+                item for item in items
+                if item.get('product_service') is not None
+                and item.get('quantity', 0) > 0
+            ]
+
+            if not valid_items:
+                raise serializers.ValidationError({
+                    "error": "At least one valid product/service with quantity greater than zero must be added."
+                })
+
+        # 2️⃣ Status transition rules (only on UPDATE)
+        if self.instance:
+            current_status = self.instance.status
+            new_status = data.get('status', current_status)
+
+            if current_status == 'Confirmed' and new_status in [
+                'Oppurtunity', 'Scoping', 'Proposal', 'Cancelled', 'Closed', 'Rejected'
+            ]:
+                raise serializers.ValidationError({
+                    "error": (
+                        "Once a quotation is Confirmed, it cannot be moved back "
+                        "to Opportunity, Scoping, or Proposal."
+                    )
+                })
+
+        return data
+
+
+
 class ProductServiceModuleSerializer(serializers.ModelSerializer):
     module_id = serializers.IntegerField(source='id')
     module_name = serializers.CharField(source='product_service_name')

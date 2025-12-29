@@ -156,7 +156,7 @@ class PipelineDataAPIView(APIView):
 
         # Group quotes by stage/status
         stages = []
-        for stage in ['Oppurtunity', 'Scoping', 'Proposal', 'Confirmed']:
+        for stage in ['Oppurtunity', 'Scoping', 'Proposal', 'Confirmed', 'Rejected', 'Closed', 'Cancelled']:
             stage_quotes = quotes.filter(status__iexact=stage)
             serializer = QuoteSummarySerializer(stage_quotes, many=True)
             stages.append({

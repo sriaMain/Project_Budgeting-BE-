@@ -3,9 +3,11 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
-from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog
+from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog, TaskExtraHoursRequest
 from .serializers import (ProjectCreateSerializer, ProjectBudgetSerializer, TaskSerializer,
- TimesheetEntrySerializer, TimesheetSerializer, TaskTimerLogSerializer)
+ TimesheetEntrySerializer, TimesheetSerializer, TaskTimerLogSerializer, 
+ TaskExtraHoursRequestSerializer, TaskExtraHoursReviewSerializer, ProjectListSerializer)
+from accounts.models import Account
 from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
@@ -37,6 +39,26 @@ class ProjectAPIView(APIView):
         )
 
     # READ PROJECT / LIST PROJECTS
+    # def get(self, request, project_id=None):
+    #     if project_id:
+    #         try:
+    #             project = Project.objects.get(project_no=project_id)
+    #         except Project.DoesNotExist:
+    #             return Response(
+    #                 {"error": "Project not found"},
+    #                 status=status.HTTP_404_NOT_FOUND
+    #             )
+
+    #         return Response(
+    #             ProjectCreateSerializer(project).data,
+    #             status=status.HTTP_200_OK
+    #         )
+
+    #     projects = Project.objects.all().order_by('-created_at')
+    #     return Response(
+    #         ProjectCreateSerializer(projects, many=True).data,
+    #         status=status.HTTP_200_OK
+    #     )
     def get(self, request, project_id=None):
         if project_id:
             try:
@@ -48,16 +70,15 @@ class ProjectAPIView(APIView):
                 )
 
             return Response(
-                ProjectCreateSerializer(project).data,
+                ProjectListSerializer(project).data,
                 status=status.HTTP_200_OK
             )
 
         projects = Project.objects.all().order_by('-created_at')
         return Response(
-            ProjectCreateSerializer(projects, many=True).data,
+            ProjectListSerializer(projects, many=True).data,
             status=status.HTTP_200_OK
         )
-
     # UPDATE PROJECT
 
     def put(self, request, project_id):
@@ -170,7 +191,7 @@ class ProjectBudgetCRUDAPIView(APIView):
             {"message": "Budget deleted successfully"},
             status=status.HTTP_204_NO_CONTENT
         )
-    
+
 
 class ProjectBudgetAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -263,7 +284,7 @@ class TaskAPIView(APIView):
 
 
 
-    def get(self, request, task_id=None):
+    def get(self, request, task_id=None, project_id=None):
         user = request.user
 
         is_employee = user.roles.filter(role_name="Employee").exists()
@@ -298,36 +319,91 @@ class TaskAPIView(APIView):
         else:
             tasks = Task.objects.none()
 
+        # 🔹 Project-related tasks
+        if project_id:
+            if is_admin or is_manager:
+                tasks = Task.objects.filter(project_id=project_id)
+            elif is_employee:
+                tasks = Task.objects.filter(project_id=project_id, assigned_to=user)
+            else:
+                tasks = Task.objects.none()
+            return Response(TaskSerializer(tasks, many=True).data, status=status.HTTP_200_OK)
+
         return Response(
             TaskSerializer(tasks, many=True).data,
             status=status.HTTP_200_OK
         )
-    
 
+
+    # def put(self, request, task_id):
+    #     try:
+    #         task = Task.objects.get(id=task_id)
+    #     except Task.DoesNotExist:
+    #         return Response(
+    #             {"error": "Task not found"},
+    #             status=status.HTTP_404_NOT_FOUND
+    #         )
+
+    #     serializer = TaskSerializer(
+    #         task,
+    #         data=request.data,
+    #         partial=True
+    #     )
+    #     serializer.is_valid(raise_exception=True)
+    #     task = serializer.save(modified_by=request.user)
+
+    #     return Response(
+    #         {
+    #             "message": "Task updated successfully",
+    #             "task": TaskSerializer(task).data
+    #         },
+    #         status=status.HTTP_200_OK
+    #     )
     def put(self, request, task_id):
         try:
             task = Task.objects.get(id=task_id)
         except Task.DoesNotExist:
             return Response(
                 {"error": "Task not found"},
-                status=status.HTTP_404_NOT_FOUND
+                status=404
             )
 
-        serializer = TaskSerializer(
-            task,
-            data=request.data,
-            partial=True
-        )
-        serializer.is_valid(raise_exception=True)
-        task = serializer.save(modified_by=request.user)
+        # Only PM / Admin can assign
+        if not request.user.roles.filter(
+            role_name__in=["Project Manager", "Admin"]
+        ).exists():
+            return Response(
+                {"error": "Permission denied"},
+                status=403
+            )
 
-        return Response(
-            {
-                "message": "Task updated successfully",
-                "task": TaskSerializer(task).data
-            },
-            status=status.HTTP_200_OK
-        )
+        assigned_to = request.data.get("assigned_to")
+
+        if not assigned_to:
+            return Response(
+                {"error": "assigned_to is required"},
+                status=400
+            )
+
+        user = Account.objects.get(id=assigned_to)
+
+        # 🔒 SAFETY CHECK: user must belong to same service as task creator (optional)
+        # if user.module != task.project.service:
+        #     return Response({"error": "User does not belong to selected service"}, status=400)
+
+        task.assigned_to = user
+        task.status = "planned"
+        task.save()
+
+        return Response({
+            "message": "Task assigned successfully",
+            "task_id": task.id,
+            "assigned_to": {
+                "id": user.id,
+                "name": user.get_full_name(),
+                "service": user.module.product_service_name if user.module else None
+            }
+        })
 
 
     def delete(self, request, task_id):
@@ -344,6 +420,29 @@ class TaskAPIView(APIView):
             {"message": "Task deleted successfully"},
             status=status.HTTP_204_NO_CONTENT
         )
+
+
+class ServiceUsersAPIView(APIView):
+    # permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from product_group.models import Product_Services
+
+        services = Product_Services.objects.filter(is_active=True)
+        result = []
+        for service in services:
+            users = Account.objects.filter(module=service, is_active=True)
+            result.append({
+                "product_services": service.product_service_name,
+                "users": [
+                    {'id': u.id, "username": u.username} for u in users
+                ]
+            })
+        return Response(result)
+
+
 
 
 # Project/views.py
@@ -396,7 +495,7 @@ class TimesheetEntryAPIView(APIView):
             TimesheetEntrySerializer(entries, many=True).data
         )
 
-    
+
 
 
     def post(self, request):
@@ -597,116 +696,6 @@ class PauseTaskTimerAPIView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
-    # def post(self, request, task_id):
-    #     user = request.user
-
-    #     task = Task.objects.get(id=task_id)
-
-    #     # 🔹 Get active timer
-    #     try:
-    #         timer = TaskTimerLog.objects.get(
-    #             task=task,
-    #             user=user,
-    #             is_active=True
-    #         )
-    #     except TaskTimerLog.DoesNotExist:
-    #         return Response(
-    #             {"error": "No active timer found"},
-    #             status=400
-    #         )
-
-    #     # 🔹 Stop timer
-    #     timer.end_time = timezone.now()
-    #     duration_minutes = int(
-    #         (timer.end_time - timer.start_time).total_seconds() / 60
-    #     )
-    #     timer.duration_minutes = duration_minutes
-    #     timer.is_active = False
-    #     timer.save()
-
-    #     if duration_minutes == 0:
-    #         return Response(
-    #             {"error": "Tracked time too short"},
-    #             status=400
-    #         )
-
-    #     worked_hours = Decimal(duration_minutes) / Decimal("60")
-    #     entry_date = timer.start_time.date()
-
-    #     # 🔹 Week calculation
-    #     week_start, week_end = get_week_range(entry_date)
-
-    #     timesheet, _ = Timesheet.objects.get_or_create(
-    #         user=user,
-    #         week_start=week_start,
-    #         defaults={"week_end": week_end}
-    #     )
-
-    #     if timesheet.status != "draft":
-    #         return Response(
-    #             {"error": "Timesheet already submitted"},
-    #             status=400
-    #         )
-
-    #     # 🔹 DAILY LIMIT (8 hrs)
-    #     daily_hours = TimesheetEntry.objects.filter(
-    #         timesheet=timesheet,
-    #         date=entry_date
-    #     ).aggregate(total=Sum("hours"))["total"] or Decimal("0")
-
-    #     if daily_hours + worked_hours > Decimal("8"):
-    #         return Response(
-    #             {"error": "Daily limit exceeded (8 hrs)"},
-    #             status=400
-    #         )
-
-    #     # 🔹 WEEKLY LIMIT (40 hrs)
-    #     weekly_hours = TimesheetEntry.objects.filter(
-    #         timesheet=timesheet
-    #     ).aggregate(total=Sum("hours"))["total"] or Decimal("0")
-
-    #     if weekly_hours + worked_hours > Decimal("40"):
-    #         return Response(
-    #             {"error": "Weekly limit exceeded (40 hrs)"},
-    #             status=400
-    #         )
-
-    #     # 🔹 TASK ALLOCATED HOURS
-    #     task_used = task.time_entries.aggregate(
-    #         total=Sum("hours")
-    #     )["total"] or Decimal("0")
-
-    #     if (
-    #         user.roles.filter(role_name="Employee").exists()
-    #         and task_used + worked_hours > task.allocated_hours
-    #     ):
-    #         return Response(
-    #             {"error": "Allocated task hours exceeded"},
-    #             status=400
-    #         )
-
-    #     # 🔹 SAVE TIMESHEET ENTRY
-    #     TimesheetEntry.objects.update_or_create(
-    #         timesheet=timesheet,
-    #         task=task,
-    #         date=entry_date,
-    #         defaults={
-    #             "hours": F("hours") + worked_hours
-    #         }
-    #     )
-
-    #     # 🔹 UPDATE TASK STATUS
-    #     if task.remaining_hours <= 0:
-    #         task.status = "completed"
-    #     else:
-    #         task.status = "in_progress"
-    #     task.save()
-
-    #     return Response({
-    #         "message": "Timer paused & time logged",
-    #         "worked_hours": float(worked_hours),
-    #         "remaining_hours": float(task.remaining_hours),
-    #     })
 
 
     def post(self, request, task_id):
@@ -813,3 +802,185 @@ class PauseTaskTimerAPIView(APIView):
             },
             "warnings": warnings
         })
+
+
+
+# class RequestExtraHoursAPIView(APIView):
+#     permission_classes = [IsAuthenticated]
+#     authentication_classes = [JWTAuthentication]
+
+#     def post(self, request, task_id):
+#         task = Task.objects.get(id=task_id)
+
+#         # Employee must be assigned
+#         if task.assigned_to != request.user:
+#             return Response(
+#                 {"error": "You are not assigned to this task"},
+#                 status=403
+#             )
+
+#         serializer = TaskExtraHoursRequestSerializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+
+#         TaskExtraHoursRequest.objects.create(
+#             task=task,
+#             requested_by=request.user,
+#             requested_hours=serializer.validated_data["requested_hours"],
+#             reason=serializer.validated_data["reason"]
+#         )
+
+#         return Response(
+#             {"message": "Extra hours request submitted"},
+#             status=201
+#         )
+
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+class RequestExtraHoursAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def post(self, request, task_id):
+        task = Task.objects.get(id=task_id)
+
+        # Employee must be assigned
+        if task.assigned_to != request.user:
+            return Response(
+                {"error": "You are not assigned to this task"},
+                status=403
+            )
+
+        serializer = TaskExtraHoursRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        TaskExtraHoursRequest.objects.create(
+            task=task,
+            requested_by=request.user,
+            requested_hours=serializer.validated_data["requested_hours"],
+            reason=serializer.validated_data["reason"],
+            # 🔥 STORE PREVIOUS HOURS
+            previous_allocated_hours=task.allocated_hours
+        )
+
+        return Response(
+            {"message": "Extra hours request submitted"},
+            status=201
+        )
+
+
+class PendingExtraHoursAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request):
+        # Only PM / Admin
+        if not request.user.roles.filter(
+            role_name__in=["Project Manager", "Admin"]
+        ).exists():
+            return Response(status=403)
+
+        requests = TaskExtraHoursRequest.objects.filter(status="pending")
+
+        data = [
+            {
+                "id": r.id,
+                "task": r.task.title,
+                "requested_by": r.requested_by.username,
+                "requested_hours": r.requested_hours,
+                "reason": r.reason,
+            }
+            for r in requests
+        ]
+
+        return Response(data)
+
+
+# class ReviewExtraHoursAPIView(APIView):
+#     permission_classes = [IsAuthenticated]
+#     authentication_classes = [JWTAuthentication]
+
+#     def post(self, request, request_id):
+#         if not request.user.roles.filter(
+#             role_name__in=["Project Manager", "Admin"]
+#         ).exists():
+#             return Response(status=403)
+
+#         req = TaskExtraHoursRequest.objects.get(id=request_id)
+
+#         serializer = TaskExtraHoursReviewSerializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+
+#         action = serializer.validated_data["action"]
+
+#         if action == "approve":
+#             # 🔥 Increase task allocated hours
+#             req.task.allocated_hours += req.requested_hours
+#             req.task.save()
+
+#             req.status = "approved"
+#         else:
+#             req.status = "rejected"
+
+#         req.reviewed_by = request.user
+#         req.reviewed_at = timezone.now()
+#         req.save()
+
+#         return Response(
+#             {"message": f"Request {req.status} successfully"}
+#         )
+
+from django.utils import timezone
+
+class ReviewExtraHoursAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def post(self, request, request_id):
+
+        # Only PM / Admin
+        if not request.user.roles.filter(
+            role_name__in=["Project Manager", "Admin"]
+        ).exists():
+            return Response(status=403)
+
+        req = TaskExtraHoursRequest.objects.get(id=request_id)
+
+        serializer = TaskExtraHoursReviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        action = serializer.validated_data["action"]
+
+        if action == "approve":
+            # 🔥 CALCULATE FINAL HOURS
+            req.approved_allocated_hours = (
+                req.previous_allocated_hours + req.requested_hours
+            )
+
+            # 🔥 UPDATE TASK
+            req.task.allocated_hours = req.approved_allocated_hours
+            req.task.save()
+
+            req.status = "approved"
+        else:
+            req.status = "rejected"
+
+        req.reviewed_by = request.user
+        req.reviewed_at = timezone.now()
+        req.save()
+
+        return Response({
+            "task": req.task.title,
+            "previous_allocated_hours": req.previous_allocated_hours,
+            "requested_extra_hours": req.requested_hours,
+            "approved_allocated_hours": req.approved_allocated_hours,
+            "status": req.status
+        })
+
+class TaskStatusChoicesView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        status_choices = [choice[0] for choice in Task.STATUS_CHOICES]
+        return Response({"status_choices": status_choices})

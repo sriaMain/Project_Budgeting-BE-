@@ -1,6 +1,6 @@
 from rest_framework import serializers
-from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog
-
+from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog, TaskExtraHoursRequest
+from django.core.exceptions import ObjectDoesNotExist
 
 class ProjectBudgetSerializer(serializers.ModelSerializer):
     forecasted_profit = serializers.DecimalField(
@@ -78,6 +78,64 @@ class ProjectBudgetSerializer(serializers.ModelSerializer):
 #             )
 #         return data
 
+# class ProjectCreateSerializer(serializers.ModelSerializer):
+#     budget = ProjectBudgetSerializer(required=False)
+
+#     class Meta:
+#         model = Project
+#         fields = (
+#             'status',
+#             'project_no',
+#             'project_name',
+#             'project_type',
+#             'start_date',
+#             'end_date',
+#             'project_manager',
+#             'created_from_quotation',
+#             'budget',
+#         )
+
+#     def validate(self, data):
+#         start_date = data.get('start_date')
+#         end_date = data.get('end_date')
+
+#         if start_date and end_date and end_date < start_date:
+#             raise serializers.ValidationError(
+#                 "End date cannot be before start date."
+#             )
+
+#         quotation = data.get('created_from_quotation')
+#         if quotation:
+#             if Project.objects.filter(
+#                 created_from_quotation=quotation
+#             ).exists():
+#                 raise serializers.ValidationError({
+#                     "created_from_quotation": "A project already exists for this quotation."
+#                 })
+
+#             if hasattr(quotation, 'status') and quotation.status != 'Confirmed':
+#                 raise serializers.ValidationError({
+#                     "created_from_quotation": "Project can only be created from a Confirmed quotation."
+#                 })
+
+#         return data
+
+#     def create(self, validated_data):
+#         budget_data = validated_data.pop('budget', None)
+#         project = Project.objects.create(**validated_data)
+
+#         if budget_data:
+#             budget = ProjectBudget.objects.create(
+#                 project=project,
+#                 **budget_data
+#             )
+#             if budget.use_quoted_amounts:
+#                 budget.apply_quoted_amounts()
+#                 budget.save()
+
+#         return project
+
+
 class ProjectCreateSerializer(serializers.ModelSerializer):
     budget = ProjectBudgetSerializer(required=False)
 
@@ -98,30 +156,52 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
     def validate(self, data):
         start_date = data.get('start_date')
         end_date = data.get('end_date')
+        project_type = data.get('project_type')
+        quotation = data.get('created_from_quotation')
 
+    
         if start_date and end_date and end_date < start_date:
             raise serializers.ValidationError(
                 "End date cannot be before start date."
             )
 
-        quotation = data.get('created_from_quotation')
-        if quotation:
-            if Project.objects.filter(
-                created_from_quotation=quotation
-            ).exists():
+        
+        if project_type == 'internal':
+            # Quotation is NOT required
+            return data
+
+        if project_type == 'external':
+
+            if not quotation:
                 raise serializers.ValidationError({
-                    "created_from_quotation": "A project already exists for this quotation."
+                    "created_from_quotation": "Quotation is required for external projects."
                 })
 
-            if hasattr(quotation, 'status') and quotation.status != 'Confirmed':
+        
+            invalid_statuses = ['Rejected', 'Cancelled', 'Closed']
+            if quotation.status in invalid_statuses:
+                raise serializers.ValidationError({
+                    "created_from_quotation": (
+                        f"Project cannot be created because the quotation is {quotation.status}."
+                    )
+                })
+
+           
+            if quotation.status != 'Confirmed':
                 raise serializers.ValidationError({
                     "created_from_quotation": "Project can only be created from a Confirmed quotation."
+                })
+
+            if Project.objects.filter(created_from_quotation=quotation).exists():
+                raise serializers.ValidationError({
+                    "created_from_quotation": "A project already exists for this quotation."
                 })
 
         return data
 
     def create(self, validated_data):
         budget_data = validated_data.pop('budget', None)
+
         project = Project.objects.create(**validated_data)
 
         if budget_data:
@@ -134,20 +214,43 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
                 budget.save()
 
         return project
+
+
+class ProjectListSerializer(serializers.ModelSerializer):
+    budget = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Project
+        fields = (
+            'project_no',
+            'project_name',
+            'status',
+            'start_date',
+            'end_date',
+            'budget',
+        )
+
+    def get_budget(self, obj):
+        try:
+            return ProjectBudgetSerializer(obj.budget).data
+        except ObjectDoesNotExist:
+            return None
     
 class TaskSerializer(serializers.ModelSerializer):
 
     created_by = serializers.SerializerMethodField()
     modified_by = serializers.SerializerMethodField()
-    project = serializers.SerializerMethodField()
+    project = serializers.PrimaryKeyRelatedField(queryset=Project.objects.all(), required=True)
     consumed_hours = serializers.SerializerMethodField()
     remaining_hours = serializers.SerializerMethodField()
 
 
-    def get_project(self, obj):
-        return {
-            'project_name': obj.project.project_name
-        } if obj.project else None
+
+    # Optionally, if you want to keep the project_name in the output, add a read-only field:
+    project_name = serializers.SerializerMethodField(read_only=True)
+
+    def get_project_name(self, obj):
+        return obj.project.project_name if obj.project else None
 
     def get_created_by(self, obj):
         return obj.created_by.username if obj.created_by else None
@@ -175,8 +278,9 @@ class TaskSerializer(serializers.ModelSerializer):
             "created_by",
             "modified_by",
             "status",
+            "project_name",
         ]
-
+        
 class TimesheetEntrySerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
@@ -258,3 +362,24 @@ class TaskTimerLogSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+
+# from rest_framework import serializers
+
+class TaskExtraHoursRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskExtraHoursRequest
+        fields = [
+            "id",
+            # "task",
+            "requested_hours",
+            "reason",
+            "status",
+            "created_at"
+
+        ]
+        read_only_fields = ["status", "created_at", "previous_allocated_hours", "approved_allocated_hours"]
+
+class TaskExtraHoursReviewSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=["approve", "reject"])

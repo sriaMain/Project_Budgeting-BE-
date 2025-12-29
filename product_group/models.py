@@ -61,6 +61,9 @@ class Quote(models.Model):
         ('Scoping', 'Scoping'),
         ('Proposal', 'Proposal'),
         ('Confirmed', 'Confirmed'),
+        ('Rejected', 'Rejected'),
+        ('Closed', 'Closed'),
+        ('Cancelled', 'Cancelled'),
     ]
     quote_no = models.AutoField(primary_key=True)
     quote_name = models.CharField(max_length=100)

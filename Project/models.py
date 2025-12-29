@@ -209,3 +209,52 @@ class TaskTimerLog(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.task} - {self.duration_minutes} mins"
+
+
+class TaskExtraHoursRequest(models.Model):
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("approved", "Approved"),
+        ("rejected", "Rejected"),
+    ]
+
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name="extra_hour_requests"
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="extra_hour_requests"
+    )
+
+    requested_hours = models.DecimalField(max_digits=5, decimal_places=2)
+    reason = models.TextField()
+    previous_allocated_hours = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True
+    )
+    approved_allocated_hours = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="pending"
+    )
+
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_extra_requests"
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.task.title} | +{self.requested_hours} hrs"
