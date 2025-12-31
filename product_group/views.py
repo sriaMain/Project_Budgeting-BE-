@@ -263,40 +263,7 @@ class SendQuoteEmailView(APIView):
         except Quote.DoesNotExist:
             raise Http404
 
-    # def post(self, request, pk):
-    #     quote = self.get_object(pk)
-
-    #     # Check if there's a point of contact with an email
-    #     if not quote.client or not quote.client.email:
-    #         return Response(
-    #             {"error": "No Point of Contact with an email address is associated with this quote."},
-    #             status=status.HTTP_400_BAD_REQUEST
-    #         )
-
-    #     # Prepare email context
-    #     subject = f"Quotation: {quote.quote_name} (Ref: {quote.quote_no})"
-    #     recipient_email = quote.client.email
-        
-    #     # For now, we'll send a simple text email. We can create an HTML template later.
-    #     message = f"""
-    #     Dear {quote.client.company_name},
-
-    #     Please find the details of your quotation '{quote.quote_name}' below.
-
-    #     Quote No: {quote.quote_no}
-    #     Total Amount: {quote.total_amount}
-    #     Due Date: {quote.due_date.strftime('%d-%b-%Y')}
-
-    #     Thank you for your business.
-
-    #     Best regards,
-    #     {request.user.first_name or 'Your Company'}
-    #     """
-
-        
-    #     send_quote_email(subject, message, recipient_email)
-    #     return Response({"success": f"Quote is being sent to {recipient_email}."}, status=status.HTTP_200_OK)
-
+    
     def post(self, request, pk):
         quote = self.get_object(pk)
 
@@ -373,4 +340,4 @@ class QuoteInvoiceDownloadView(APIView):
         pdf_file = HTML(string=html_string).write_pdf()
         response = HttpResponse(pdf_file, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="invoice_{quote.quote_no}.pdf"'
-        return response
+        return response 

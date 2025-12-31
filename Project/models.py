@@ -32,7 +32,7 @@ class Project(models.Model):
     default="planning"
 )
     project_no = models.AutoField(primary_key=True)
-    project_name = models.CharField(max_length=255)
+    project_name = models.CharField(max_length=255, unique=True)
     project_type = models.CharField(max_length=20, choices=PROJECT_TYPE_CHOICES)
     client = models.ForeignKey('client.Company', on_delete=models.SET_NULL, null=True, blank=True)
     currency = models.CharField(max_length=10, choices=CURRENCY_CHOICES, default='INR')

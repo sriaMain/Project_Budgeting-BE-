@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog, TaskExtraHoursRequest
 from django.core.exceptions import ObjectDoesNotExist
+from accounts.models import Account
 
 class ProjectBudgetSerializer(serializers.ModelSerializer):
     forecasted_profit = serializers.DecimalField(
@@ -236,18 +237,104 @@ class ProjectListSerializer(serializers.ModelSerializer):
         except ObjectDoesNotExist:
             return None
     
+# class TaskSerializer(serializers.ModelSerializer):
+
+#     created_by = serializers.SerializerMethodField()
+#     modified_by = serializers.SerializerMethodField()
+#     project = serializers.PrimaryKeyRelatedField(queryset=Project.objects.all(), required=True)
+#     consumed_hours = serializers.SerializerMethodField()
+#     remaining_hours = serializers.SerializerMethodField()
+
+
+
+#     # Optionally, if you want to keep the project_name in the output, add a read-only field:
+#     project_name = serializers.SerializerMethodField(read_only=True)
+
+#     def get_project_name(self, obj):
+#         return obj.project.project_name if obj.project else None
+
+#     def get_created_by(self, obj):
+#         return obj.created_by.username if obj.created_by else None
+
+#     def get_modified_by(self, obj):
+#         return obj.modified_by.username if obj.modified_by else None
+    
+#     def get_consumed_hours(self, obj):
+#         return obj.consumed_hours
+
+#     def get_remaining_hours(self, obj):
+#         return obj.remaining_hours
+#     assigned_to = serializers.PrimaryKeyRelatedField(
+#         queryset=Account.objects.all(),
+#         required=False,
+#         allow_null=True
+#     )
+
+#     def to_representation(self, instance):
+#         rep = super().to_representation(instance)
+#         # Replace assigned_to with user object if present
+#         if instance.assigned_to:
+#             rep["assigned_to"] = {
+#                 "id": instance.assigned_to.id,
+#                 "username": instance.assigned_to.username
+#             }
+#         else:
+#             rep["assigned_to"] = None
+#         return rep
+
+#     class Meta:
+#         model = Task
+#         fields = [
+#             "id",
+#             "title",
+#             "allocated_hours",
+#             "consumed_hours",
+#             "remaining_hours",
+#             "allocated_hours",
+#             "assigned_to",
+#             "project",
+#             "created_by",
+#             "modified_by",
+#             "status",
+#             "project_name",
+#         ]
 class TaskSerializer(serializers.ModelSerializer):
-
-    created_by = serializers.SerializerMethodField()
-    modified_by = serializers.SerializerMethodField()
-    project = serializers.PrimaryKeyRelatedField(queryset=Project.objects.all(), required=True)
-    consumed_hours = serializers.SerializerMethodField()
-    remaining_hours = serializers.SerializerMethodField()
-
-
-
-    # Optionally, if you want to keep the project_name in the output, add a read-only field:
+    created_by = serializers.SerializerMethodField(read_only=True)
+    modified_by = serializers.SerializerMethodField(read_only=True)
+    assigned_to = serializers.PrimaryKeyRelatedField(
+        queryset=Account.objects.all(),
+        required=False,
+        allow_null=True
+    )
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.all(),
+        required=True
+    )
     project_name = serializers.SerializerMethodField(read_only=True)
+    consumed_hours = serializers.SerializerMethodField(read_only=True)
+    remaining_hours = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Task
+        fields = [
+            "id",
+            "title",
+            "status",
+            "allocated_hours",
+            "consumed_hours",
+            "remaining_hours",
+            "assigned_to",
+            "project",
+            "project_name",
+            "created_by",
+            "modified_by",
+        ]
+        read_only_fields = [
+            "created_by",
+            "modified_by",
+            "consumed_hours",
+            "remaining_hours",
+        ]
 
     def get_project_name(self, obj):
         return obj.project.project_name if obj.project else None
@@ -257,30 +344,24 @@ class TaskSerializer(serializers.ModelSerializer):
 
     def get_modified_by(self, obj):
         return obj.modified_by.username if obj.modified_by else None
-    
+
     def get_consumed_hours(self, obj):
         return obj.consumed_hours
 
     def get_remaining_hours(self, obj):
         return obj.remaining_hours
 
-    class Meta:
-        model = Task
-        fields = [
-            "id",
-            "title",
-            "allocated_hours",
-            "consumed_hours",
-            "remaining_hours",
-            "allocated_hours",
-            "assigned_to",
-            "project",
-            "created_by",
-            "modified_by",
-            "status",
-            "project_name",
-        ]
-        
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        # Replace assigned_to with user object if present
+        if instance.assigned_to:
+            rep["assigned_to"] = {
+                "id": instance.assigned_to.id,
+                "username": instance.assigned_to.username
+            }
+        else:
+            rep["assigned_to"] = None
+        return rep
 class TimesheetEntrySerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
