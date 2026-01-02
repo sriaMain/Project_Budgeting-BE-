@@ -136,11 +136,19 @@ class Task(models.Model):
     def __str__(self):
         return self.title
 
+    # @property
+    # def consumed_hours(self):
+    #     return self.time_entries.aggregate(
+    #         total=models.Sum('hours')
+    #     )['total'] or 0
+
     @property
     def consumed_hours(self):
         return self.time_entries.aggregate(
             total=models.Sum('hours')
         )['total'] or 0
+
+
 
     @property
     def remaining_hours(self):

@@ -38,27 +38,7 @@ class ProjectAPIView(APIView):
             status=status.HTTP_201_CREATED
         )
 
-    # READ PROJECT / LIST PROJECTS
-    # def get(self, request, project_id=None):
-    #     if project_id:
-    #         try:
-    #             project = Project.objects.get(project_no=project_id)
-    #         except Project.DoesNotExist:
-    #             return Response(
-    #                 {"error": "Project not found"},
-    #                 status=status.HTTP_404_NOT_FOUND
-    #             )
 
-    #         return Response(
-    #             ProjectCreateSerializer(project).data,
-    #             status=status.HTTP_200_OK
-    #         )
-
-    #     projects = Project.objects.all().order_by('-created_at')
-    #     return Response(
-    #         ProjectCreateSerializer(projects, many=True).data,
-    #         status=status.HTTP_200_OK
-    #     )
     def get(self, request, project_id=None):
         if project_id:
             try:
@@ -74,11 +54,46 @@ class ProjectAPIView(APIView):
                 status=status.HTTP_200_OK
             )
 
-        projects = Project.objects.all().order_by('-created_at')
-        return Response(
-            ProjectListSerializer(projects, many=True).data,
-            status=status.HTTP_200_OK
-        )
+        # Accept both 'search' and common typo 'serach' as query param
+        search = request.GET.get('search', '').strip()
+        if not search:
+            search = request.GET.get('serach', '').strip()
+        status_param = request.GET.get('status', '').strip()
+        budget_param = request.GET.get('budget', '').strip()
+        projects = Project.objects.select_related('client', 'budget').all()
+        # If only status is provided, filter only by status
+        if status_param and not search and not budget_param:
+            projects = projects.filter(status__icontains=status_param)
+        else:
+            # Filter by project_name (search)
+            if search:
+                projects = projects.filter(project_name__icontains=search)
+            # Filter by status
+            if status_param:
+                projects = projects.filter(status__icontains=status_param)
+            # Filter by budget fields (total_budget or currency)
+            if budget_param:
+                from django.db.models import Q
+                # Always filter by string match on total_budget and currency
+                projects = projects.filter(
+                    Q(budget__total_budget__isnull=False) & Q(budget__total_budget__icontains=budget_param)
+                    | Q(budget__currency__icontains=budget_param)
+                )
+        # from .serializers import ProjectListSerializer  # Already imported at the top
+        company_map = {}
+        for project in projects:
+            client_name = project.client.company_name if project.client else "No Client"
+            if client_name not in company_map:
+                company_map[client_name] = {
+                    "company_name": client_name,
+                    "total_projects": 0,
+                    "project_details": []
+                }
+            company_map[client_name]["project_details"].append(ProjectListSerializer(project).data)
+            company_map[client_name]["total_projects"] += 1
+        # Return as a list under the key 'Projects'
+        result = {"Projects": list(company_map.values())}
+        return Response(result, status=status.HTTP_200_OK)
     # UPDATE PROJECT
 
     def put(self, request, project_id):
@@ -293,7 +308,8 @@ class TaskAPIView(APIView):
 
         # 🔹 Task detail
         if task_id:
-            task = get_object_or_404(Task, id=task_id)
+            from .models import Task
+            task = get_object_or_404(Task.objects.prefetch_related('time_entries'), id=task_id)
 
             # Employee can only view assigned task
             if is_employee and task.assigned_to != user:
@@ -312,29 +328,67 @@ class TaskAPIView(APIView):
             return Response(TaskSerializer(task).data)
 
         # 🔹 Task list
+        from .models import Task
         if is_admin or is_manager:
-            tasks = Task.objects.all()
+            tasks = Task.objects.prefetch_related('time_entries').all()
         elif is_employee:
-            tasks = Task.objects.filter(assigned_to=user)
+            tasks = Task.objects.prefetch_related('time_entries').filter(assigned_to=user)
         else:
             tasks = Task.objects.none()
 
-        # 🔹 Project-related tasks
+        # Group tasks by project for all cases
+        from .redis_utils import get_active_timer
+        def add_live_timer_fields(task, user):
+            data = TaskSerializer(task).data
+            redis_task, redis_start = get_active_timer(user.id)
+            consumed_hours = float(data["consumed_hours"])
+            allocated_hours = float(data["allocated_hours"])
+            if redis_task and int(redis_task) == task.id:
+                from django.utils import timezone
+                start_time = timezone.datetime.fromisoformat(redis_start.decode())
+                elapsed_seconds = int((timezone.now() - start_time).total_seconds())
+                running_hours = elapsed_seconds / 3600
+                consumed_hours += running_hours
+                data["consumed_hours"] = consumed_hours
+                data["remaining_hours"] = max(allocated_hours - consumed_hours, 0)
+            # Calculate needs_extra_hours using the possibly updated consumed_hours
+            data["needs_extra_hours"] = consumed_hours > allocated_hours
+            return data
+
+        def group_tasks_by_project(tasks, user):
+            project_map = {}
+            for task in tasks:
+                project = task.project
+                if not project:
+                    continue
+                project_id = project.project_no
+                project_name = project.project_name
+                if project_id not in project_map:
+                    project_map[project_id] = {
+                        "project_name": project_name,
+                        "project_no": project_id,
+                        "Tasks": []
+                    }
+                # Add full task details (including task_id, etc), with live timer values if running
+                task_data = add_live_timer_fields(task, user)
+                task_data["task_id"] = task.id
+                project_map[project_id]["Tasks"].append(task_data)
+            return list(project_map.values())
+
+        # If project_id is provided, filter tasks accordingly
         if project_id:
             if is_admin or is_manager:
-                tasks = Task.objects.filter(project_id=project_id)
+                tasks = Task.objects.prefetch_related('time_entries').filter(project_id=project_id)
             elif is_employee:
-                tasks = Task.objects.filter(project_id=project_id, assigned_to=user)
+                tasks = Task.objects.prefetch_related('time_entries').filter(project_id=project_id, assigned_to=user)
             else:
                 tasks = Task.objects.none()
-            return Response(TaskSerializer(tasks, many=True).data, status=status.HTTP_200_OK)
 
+        grouped = group_tasks_by_project(tasks, user)
         return Response(
-            TaskSerializer(tasks, many=True).data,
+            grouped,
             status=status.HTTP_200_OK
         )
-
-
     def put(self, request, task_id):
         try:
             task = Task.objects.get(id=task_id)
@@ -638,59 +692,6 @@ class SubmitTimesheetAPIView(APIView):
 
 
 
-# class StartTaskTimerAPIView(APIView):
-#     permission_classes = [IsAuthenticated]
-#     authentication_classes = [JWTAuthentication]
-
-#     def post(self, request, task_id):
-#         user = request.user
-
-#         task = Task.objects.get(id=task_id)
-
-#         # 🔒 Only one active timer per user
-#         if TaskTimerLog.objects.filter(user=user, is_active=True).exists():
-#             return Response(
-#                 {"error": "You already have an active timer"},
-#                 status=400
-#             )
-
-#         # 🔒 Employee must be assigned
-#         is_employee = user.roles.filter(role_name="Employee").exists()
-#         if is_employee and task.assigned_to != user:
-#             return Response(
-#                 {"error": "Task not assigned to you"},
-#                 status=403
-#             )
-
-#         # Resume feature: if a previous timer exists for this user and task, and is not active, allow resuming (create a new timer log)
-#         previous_timer = TaskTimerLog.objects.filter(user=user, task=task, is_active=False).order_by('-end_time').first()
-#         if previous_timer:
-#             TaskTimerLog.objects.create(
-#                 task=task,
-#                 user=user,
-#                 start_time=timezone.now(),
-#                 is_active=True
-#             )
-#             task.status = "in_progress"
-#             task.save()
-#             return Response({
-#                 "message": "Timer resumed for this task. You can pause it when needed.",
-#                 "action": "resumed"
-#             })
-#         else:
-#             TaskTimerLog.objects.create(
-#                 task=task,
-#                 user=user,
-#                 start_time=timezone.now(),
-#                 is_active=True
-#             )
-#             task.status = "in_progress"
-#             task.save()
-#             return Response({
-#                 "message": "Timer started for this task. You can pause it when needed.",
-#                 "action": "started"
-#             })
-
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from .redis_utils import seconds_to_hms, set_active_timer
@@ -703,28 +704,62 @@ class StartTaskTimerAPIView(APIView):
 
     def post(self, request, task_id):
         user = request.user
-        task = Task.objects.get(id=task_id)
 
-        # ✅ FIXED
-        if has_active_timer(user.id):
+        try:
+            task = Task.objects.get(id=task_id)
+        except Task.DoesNotExist:
             return Response(
-                {"error": "Another timer is already running"},
+                {"error": "Task not found"},
+                status=404
+            )
+
+        # 🔐 PERMISSION CHECK (CRITICAL)
+        if user.is_staff:
+            return Response(
+                {"error": "Admins are not allowed to start task timers"},
+                status=403
+            )
+
+        if task.assigned_to_id != user.id:
+            return Response(
+                {"error": "You are not assigned to this task"},
+                status=403
+            )
+
+        # ⏱ Check if another timer is already running
+        if has_active_timer(user.id):
+            running_task_id, running_start = get_active_timer(user.id)
+
+            running_task = None
+            if running_task_id:
+                try:
+                    running_task = Task.objects.get(id=int(running_task_id))
+                except Task.DoesNotExist:
+                    pass
+
+            return Response(
+                {
+                    "error": "Another timer is already running",
+                    "running_task": {
+                        "id": int(running_task_id),
+                        "title": running_task.title if running_task else None,
+                        "started_at": running_start.decode() if running_start else None,
+                    }
+                },
                 status=400
             )
 
+        # ▶️ START TIMER
         timer = TaskTimerLog.objects.create(
             task=task,
             user=user,
             start_time=timezone.now(),
             is_active=True
         )
-        print("USER:", request.user)
-        print("AUTH:", request.auth)
-        print("IS AUTH:", request.user.is_authenticated)
 
         set_active_timer(user.id, task.id, timer.start_time)
 
-        # 🔥 SEND WEBSOCKET EVENT
+        # 🔥 WebSocket Event
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f"user_{user.id}",
@@ -738,7 +773,7 @@ class StartTaskTimerAPIView(APIView):
             }
         )
 
-        return Response({"message": "Timer started"})
+        return Response({"message": "Timer started successfully"})
 
 
 from .utils import get_week_range
@@ -749,10 +784,6 @@ from .utils import get_week_range
 from .redis_utils import clear_active_timer
 
 
-
-from django.utils import timezone
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
 
 class PauseTaskTimerAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -766,11 +797,37 @@ class PauseTaskTimerAPIView(APIView):
             user=user,
             is_active=True
         ).order_by('-start_time').first()
+
         if not timer:
-            return Response(
-                {"error": "No active timer to pause"},
-                status=400
-            )
+            # Check if Redis has a running timer for this user
+            redis_task, redis_start = get_active_timer(user.id)
+            force_clear = request.query_params.get('force_clear')
+            if redis_task:
+                # There is a running timer in Redis, but not in DB
+                if force_clear == '1':
+                    clear_active_timer(user.id)
+                    return Response({
+                        "message": "Redis timer state force-cleared. You can now start a new timer."
+                    })
+                try:
+                    running_task = Task.objects.get(id=int(redis_task))
+                    running_title = running_task.title
+                except Exception:
+                    running_title = None
+                return Response({
+                    "error": "No active timer to pause for this task, but a timer is running for another task.",
+                    "running_task": {
+                        "id": int(redis_task),
+                        "title": running_title,
+                        "started_at": redis_start.decode() if redis_start else None
+                    },
+                    "recovery": "If you want to force clear the running timer, call this endpoint with ?force_clear=1."
+                }, status=400)
+            else:
+                return Response(
+                    {"error": "No active timer to pause"},
+                    status=400
+                )
 
         end_time = timezone.now()
         elapsed_seconds = int(
@@ -779,33 +836,107 @@ class PauseTaskTimerAPIView(APIView):
 
         timer.end_time = end_time
         timer.is_active = False
+        timer.duration_minutes = elapsed_seconds // 60
         timer.save()
 
+        # --- Update timesheet entry (same as stop logic) ---
+        from decimal import Decimal
+        entry_date = end_time.date()
+        week_start = entry_date - timedelta(days=entry_date.weekday())
+        week_end = week_start + timedelta(days=6)
+        timesheet, _ = Timesheet.objects.get_or_create(
+            user=user,
+            week_start=week_start,
+            defaults={"week_end": week_end}
+        )
+        hours = Decimal(elapsed_seconds) / Decimal("3600")
+        # Always ensure task and timesheet are not null
+        from Project.models import Task
+        task = Task.objects.filter(id=task_id).first()
+        if not task:
+            return Response({"error": "Task not found for timesheet entry update."}, status=400)
+        entry, created = TimesheetEntry.objects.get_or_create(
+            timesheet=timesheet,
+            task=task,
+            date=entry_date,
+            defaults={"hours": hours}
+        )
+        if not created:
+            entry.hours += hours
+            entry.save()
+
+        # ✅ Clear redis timer state so user can start a new timer
         clear_active_timer(user.id)
-        # running_hours = elapsed_seconds / 3600
-        # timer.task.consumed_hours += Decimal(str(running_hours))
-        
 
-        hms = seconds_to_hms(elapsed_seconds)
+        return Response({
+            "message": "Timer paused",
+            "worked_seconds": elapsed_seconds,
+            "consumed_hours": float(entry.task.consumed_hours),
+            "remaining_hours": float(entry.task.remaining_hours),
+        })
 
-        # 🔥 NOW SEND WEBSOCKET EVENT
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"user_{user.id}",
-            {
-                "type": "timer_event",
-                "data": {
-                    "event": "TIMER_PAUSED",
-                    "task_id": task_id,
-                    "worked_seconds": elapsed_seconds,
-                    "allocated_hours": float(timer.task.allocated_hours),
-                    "consumed_hours": float(timer.task.consumed_hours),
-                    "remaining_hours": float(timer.task.remaining_hours),
-                }
-            }
+
+class StopTaskTimerAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def post(self, request, task_id):
+        user = request.user
+
+        # Get ALL inactive logs for this task today
+        timer_logs = TaskTimerLog.objects.filter(
+            task_id=task_id,
+            user=user,
+            is_active=False,
+            end_time__date=timezone.now().date()
         )
 
-        return Response({"message": "Timer paused"})
+        if not timer_logs.exists():
+            return Response(
+                {"error": "No timer data to stop"},
+                status=400
+            )
+
+        # ✅ Total duration in seconds
+        total_seconds = timer_logs.aggregate(
+            total=Sum("duration_minutes")
+        )["total"] or 0
+
+        hours = Decimal(total_seconds) / Decimal("60")
+
+        # -------------------------------
+        # CREATE / UPDATE TIMESHEET ENTRY
+        # -------------------------------
+        entry_date = timezone.now().date()
+        week_start = entry_date - timedelta(days=entry_date.weekday())
+        week_end = week_start + timedelta(days=6)
+
+        timesheet, _ = Timesheet.objects.get_or_create(
+            user=user,
+            week_start=week_start,
+            defaults={"week_end": week_end}
+        )
+
+        entry, created = TimesheetEntry.objects.get_or_create(
+            timesheet=timesheet,
+            task_id=task_id,
+            date=entry_date,
+            defaults={"hours": hours}
+        )
+
+        if not created:
+            entry.hours += hours
+            entry.save()
+
+        # ✅ Clear redis timer state so user can start a new timer
+        clear_active_timer(user.id)
+
+        return Response({
+            "message": "Timer stopped and timesheet updated",
+            "logged_hours": round(hours, 2),
+            "consumed_hours": float(entry.task.consumed_hours),
+            "remaining_hours": float(entry.task.remaining_hours),
+        })
 
 
 # from django.utils import timezone
@@ -816,26 +947,77 @@ class TaskTimerStateAPIView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
+#     def get(self, request, task_id):
+#         user = request.user
+#         try:
+#             task = Task.objects.get(id=task_id)
+#         except Task.DoesNotExist:
+#             return Response({"error": "No task found with this ID."}, status=404)
+
+#         redis_task, redis_start = get_active_timer(user.id)
+
+#         # Default committed values
+#         committed_consumed = float(task.consumed_hours)
+#         allocated_hours = float(task.allocated_hours)
+
+#         if redis_task and int(redis_task) == task_id:
+#             start_time = timezone.datetime.fromisoformat(
+#                 redis_start.decode()
+#             )
+
+#             elapsed_seconds = int(
+#                 (timezone.now() - start_time).total_seconds()
+#             )
+
+#             # 🔥 LIVE calculation (THIS IS THE FIX)
+#             running_hours = elapsed_seconds / 3600
+#             live_consumed = committed_consumed + running_hours
+#             live_remaining = max(allocated_hours - live_consumed, 0)
+
+#             hms = seconds_to_hms(elapsed_seconds)
+
+#             return Response({
+#                 "status": "running",
+#                 "elapsed_seconds": elapsed_seconds,
+#                 "time": hms,
+#                 "started_at": start_time,
+#                 "task_id": task_id,
+
+#                 # DB values
+#                 "allocated_hours": allocated_hours,
+
+#                 # LIVE values (UI only)
+#                 "consumed_hours": round(live_consumed, 4),
+#                 "remaining_hours": round(live_remaining, 4),
+#             })
+
+#         # If not running → return committed DB values
+#         return Response({
+#             "status": "paused",
+#             "task_id": task_id,
+#             "allocated_hours": allocated_hours,
+#             "consumed_hours": committed_consumed,
+#             "remaining_hours": max(allocated_hours - committed_consumed, 0),
+#         })
+
     def get(self, request, task_id):
         user = request.user
-        task = Task.objects.get(id=task_id)
+
+        try:
+            task = Task.objects.get(id=task_id)
+        except Task.DoesNotExist:
+            return Response({"error": "No task found with this ID."}, status=404)
 
         redis_task, redis_start = get_active_timer(user.id)
 
-        # Default committed values
         committed_consumed = float(task.consumed_hours)
         allocated_hours = float(task.allocated_hours)
 
+        # ✅ CASE 1: THIS TASK IS RUNNING
         if redis_task and int(redis_task) == task_id:
-            start_time = timezone.datetime.fromisoformat(
-                redis_start.decode()
-            )
+            start_time = timezone.datetime.fromisoformat(redis_start.decode())
+            elapsed_seconds = int((timezone.now() - start_time).total_seconds())
 
-            elapsed_seconds = int(
-                (timezone.now() - start_time).total_seconds()
-            )
-
-            # 🔥 LIVE calculation (THIS IS THE FIX)
             running_hours = elapsed_seconds / 3600
             live_consumed = committed_consumed + running_hours
             live_remaining = max(allocated_hours - live_consumed, 0)
@@ -844,28 +1026,65 @@ class TaskTimerStateAPIView(APIView):
 
             return Response({
                 "status": "running",
+
+                "task_id": task_id,
+                "active_task_id": task_id,
+
+                "has_active_timer": True,
+                "is_current_task_running": True,
+
+                # 🔥 BUTTON FLAGS
+                "can_start": False,
+                "can_pause": True,
+                "can_stop": True,
+
                 "elapsed_seconds": elapsed_seconds,
                 "time": hms,
                 "started_at": start_time,
-                "task_id": task_id,
 
-                # DB values
                 "allocated_hours": allocated_hours,
-
-                # LIVE values (UI only)
                 "consumed_hours": round(live_consumed, 4),
                 "remaining_hours": round(live_remaining, 4),
             })
 
-        # If not running → return committed DB values
+        # ✅ CASE 2: SOME OTHER TASK IS RUNNING
+        if redis_task and int(redis_task) != task_id:
+            return Response({
+                "status": "blocked",
+
+                "task_id": task_id,
+                "active_task_id": int(redis_task),
+
+                "has_active_timer": True,
+                "is_current_task_running": False,
+
+                # 🔥 BUTTON FLAGS
+                "can_start": False,
+                "can_pause": False,
+                "can_stop": False,
+
+                "message": "Another task timer is already running",
+            })
+
+        # ✅ CASE 3: NO ACTIVE TIMER (PAUSED / FRESH)
         return Response({
             "status": "paused",
+
             "task_id": task_id,
+            "active_task_id": None,
+
+            "has_active_timer": False,
+            "is_current_task_running": False,
+
+            # 🔥 BUTTON FLAGS
+            "can_start": True,
+            "can_pause": False,
+            "can_stop": False,
+
             "allocated_hours": allocated_hours,
             "consumed_hours": committed_consumed,
             "remaining_hours": max(allocated_hours - committed_consumed, 0),
         })
-
 
 
 
@@ -933,39 +1152,6 @@ class PendingExtraHoursAPIView(APIView):
         return Response(data)
 
 
-# class ReviewExtraHoursAPIView(APIView):
-#     permission_classes = [IsAuthenticated]
-#     authentication_classes = [JWTAuthentication]
-
-#     def post(self, request, request_id):
-#         if not request.user.roles.filter(
-#             role_name__in=["Project Manager", "Admin"]
-#         ).exists():
-#             return Response(status=403)
-
-#         req = TaskExtraHoursRequest.objects.get(id=request_id)
-
-#         serializer = TaskExtraHoursReviewSerializer(data=request.data)
-#         serializer.is_valid(raise_exception=True)
-
-#         action = serializer.validated_data["action"]
-
-#         if action == "approve":
-#             # 🔥 Increase task allocated hours
-#             req.task.allocated_hours += req.requested_hours
-#             req.task.save()
-
-#             req.status = "approved"
-#         else:
-#             req.status = "rejected"
-
-#         req.reviewed_by = request.user
-#         req.reviewed_at = timezone.now()
-#         req.save()
-
-#         return Response(
-#             {"message": f"Request {req.status} successfully"}
-#         )
 
 from django.utils import timezone
 

@@ -1,5 +1,5 @@
 from django.urls import path, include
-from .views import (ProjectAPIView, ProjectBudgetAPIView, TaskAPIView, TaskTimerStateAPIView,
+from .views import (ProjectAPIView, ProjectBudgetAPIView, StopTaskTimerAPIView, TaskAPIView, TaskTimerStateAPIView,
  TimesheetAPIView, TimesheetEntryAPIView, SubmitTimesheetAPIView, StartTaskTimerAPIView,
   PauseTaskTimerAPIView, PendingExtraHoursAPIView, ReviewExtraHoursAPIView, RequestExtraHoursAPIView,
   TaskStatusChoicesView, ServiceUsersAPIView, TaskGroupedByStatusAPIView)
@@ -25,10 +25,10 @@ urlpatterns = [
     path("tasks/extra-hours/<request_id>/review/", ReviewExtraHoursAPIView.as_view()), #review extra hours requests
     path('task-status-choices/', TaskStatusChoicesView.as_view(), name='task-status-choices'), #get task status choices
     path('tasks/grouped-by-status/', TaskGroupedByStatusAPIView.as_view(), name='tasks-grouped-by-status'),
-    path("tasks/<int:task_id>/timer/state/",TaskTimerStateAPIView.as_view(),name="task-timer-state"
-    ),
+    path("tasks/<int:task_id>/timer/state/",TaskTimerStateAPIView.as_view(),name="task-timer-state"),
+    path("tasks/<int:task_id>/timer/stop/", StopTaskTimerAPIView.as_view(), name="task-timer-stop"),
     # path()
-    
+
   
 
         

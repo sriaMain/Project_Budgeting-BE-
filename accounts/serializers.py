@@ -381,22 +381,33 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
+        import string, random
         roles = validated_data.pop("roles", [])
         email = validated_data.pop("email").lower().strip()
-        
         # Ensure a unique username (required by AbstractUser)
         base_username = email.split("@")[0]
         username = f"{base_username}-{uuid.uuid4().hex[:8]}"
-        
+        # Generate a random password
+        password = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
         user = User.objects.create_user(
             username=username,
             email=email,
+            password=password,
             **validated_data
         )
-        
         if roles:
             user.roles.set(roles)
-            
+            # Set is_staff True only for Admins
+            if any(role.role_name == "Admin" for role in user.roles.all()):
+                user.is_staff = True
+            else:
+                user.is_staff = False
+            user.save(update_fields=["is_staff"])
+        # Send password to user via email
+        subject = "Your Account Registration"
+        msg = f"Hello {user.get_full_name() or user.username},\n\nYour account has been created. Your login password is: {password}\n\nPlease change your password after logging in."
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
+        send_mail(subject, msg, from_email, [user.email], fail_silently=False)
         return user
 
 

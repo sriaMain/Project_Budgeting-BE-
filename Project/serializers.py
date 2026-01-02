@@ -27,115 +27,6 @@ class ProjectBudgetSerializer(serializers.ModelSerializer):
                     )
         return data
     
-# class ProjectCreateSerializer(serializers.ModelSerializer):
-#     budget = ProjectBudgetSerializer(required=False)
-
-#     class Meta:
-#         model = Project
-#         fields = (
-#             'status',
-#             'project_no',
-#             'project_name',
-#             'project_type',
-#             'start_date',
-#             'end_date',
-#             'project_manager',
-#             'created_from_quotation',
-#             'budget',
-    
-#         )
-
-#     def create(self, validated_data):
-#         # Restrict project creation only from confirmed quotations
-#         quotation = validated_data.get('created_from_quotation')
-#         budget_data = validated_data.get('budget', {})
-#         if quotation and hasattr(quotation, 'status'):
-#             if quotation.status != 'Confirmed':
-#                 raise serializers.ValidationError({
-#                     'error': 'Project can only be created from a Confirmed quotation.'
-#                 })
-#         # If use_quoted_amounts is True, quotation must be present
-#         if budget_data and budget_data.get('use_quoted_amounts') and not quotation:
-#             raise serializers.ValidationError(
-#                 'Quotation is required when using quoted amounts.'
-#             )
-#         budget_data = validated_data.pop('budget', None)
-#         project = Project.objects.create(**validated_data)
-#         if budget_data:
-#             budget = ProjectBudget.objects.create(
-#                 project=project,
-#                 **budget_data
-#             )
-#             if budget.use_quoted_amounts:
-#                 budget.apply_quoted_amounts()
-#                 budget.save()
-#         return project
-#     def validate (self, data):
-#         start_date = data.get('start_date')
-#         end_date = data.get('end_date')
-#         if start_date and end_date and end_date < start_date:
-#             raise serializers.ValidationError(
-#                 "End date cannot be before start date."
-#             )
-#         return data
-
-# class ProjectCreateSerializer(serializers.ModelSerializer):
-#     budget = ProjectBudgetSerializer(required=False)
-
-#     class Meta:
-#         model = Project
-#         fields = (
-#             'status',
-#             'project_no',
-#             'project_name',
-#             'project_type',
-#             'start_date',
-#             'end_date',
-#             'project_manager',
-#             'created_from_quotation',
-#             'budget',
-#         )
-
-#     def validate(self, data):
-#         start_date = data.get('start_date')
-#         end_date = data.get('end_date')
-
-#         if start_date and end_date and end_date < start_date:
-#             raise serializers.ValidationError(
-#                 "End date cannot be before start date."
-#             )
-
-#         quotation = data.get('created_from_quotation')
-#         if quotation:
-#             if Project.objects.filter(
-#                 created_from_quotation=quotation
-#             ).exists():
-#                 raise serializers.ValidationError({
-#                     "created_from_quotation": "A project already exists for this quotation."
-#                 })
-
-#             if hasattr(quotation, 'status') and quotation.status != 'Confirmed':
-#                 raise serializers.ValidationError({
-#                     "created_from_quotation": "Project can only be created from a Confirmed quotation."
-#                 })
-
-#         return data
-
-#     def create(self, validated_data):
-#         budget_data = validated_data.pop('budget', None)
-#         project = Project.objects.create(**validated_data)
-
-#         if budget_data:
-#             budget = ProjectBudget.objects.create(
-#                 project=project,
-#                 **budget_data
-#             )
-#             if budget.use_quoted_amounts:
-#                 budget.apply_quoted_amounts()
-#                 budget.save()
-
-#         return project
-
 
 class ProjectCreateSerializer(serializers.ModelSerializer):
     budget = ProjectBudgetSerializer(required=False)
@@ -237,68 +128,9 @@ class ProjectListSerializer(serializers.ModelSerializer):
         except ObjectDoesNotExist:
             return None
     
-# class TaskSerializer(serializers.ModelSerializer):
 
-#     created_by = serializers.SerializerMethodField()
-#     modified_by = serializers.SerializerMethodField()
-#     project = serializers.PrimaryKeyRelatedField(queryset=Project.objects.all(), required=True)
-#     consumed_hours = serializers.SerializerMethodField()
-#     remaining_hours = serializers.SerializerMethodField()
-
-
-
-#     # Optionally, if you want to keep the project_name in the output, add a read-only field:
-#     project_name = serializers.SerializerMethodField(read_only=True)
-
-#     def get_project_name(self, obj):
-#         return obj.project.project_name if obj.project else None
-
-#     def get_created_by(self, obj):
-#         return obj.created_by.username if obj.created_by else None
-
-#     def get_modified_by(self, obj):
-#         return obj.modified_by.username if obj.modified_by else None
-    
-#     def get_consumed_hours(self, obj):
-#         return obj.consumed_hours
-
-#     def get_remaining_hours(self, obj):
-#         return obj.remaining_hours
-#     assigned_to = serializers.PrimaryKeyRelatedField(
-#         queryset=Account.objects.all(),
-#         required=False,
-#         allow_null=True
-#     )
-
-#     def to_representation(self, instance):
-#         rep = super().to_representation(instance)
-#         # Replace assigned_to with user object if present
-#         if instance.assigned_to:
-#             rep["assigned_to"] = {
-#                 "id": instance.assigned_to.id,
-#                 "username": instance.assigned_to.username
-#             }
-#         else:
-#             rep["assigned_to"] = None
-#         return rep
-
-#     class Meta:
-#         model = Task
-#         fields = [
-#             "id",
-#             "title",
-#             "allocated_hours",
-#             "consumed_hours",
-#             "remaining_hours",
-#             "allocated_hours",
-#             "assigned_to",
-#             "project",
-#             "created_by",
-#             "modified_by",
-#             "status",
-#             "project_name",
-#         ]
 class TaskSerializer(serializers.ModelSerializer):
+    due_date = serializers.DateField(required=True)
     created_by = serializers.SerializerMethodField(read_only=True)
     modified_by = serializers.SerializerMethodField(read_only=True)
     assigned_to = serializers.PrimaryKeyRelatedField(
@@ -313,6 +145,7 @@ class TaskSerializer(serializers.ModelSerializer):
     project_name = serializers.SerializerMethodField(read_only=True)
     consumed_hours = serializers.SerializerMethodField(read_only=True)
     remaining_hours = serializers.SerializerMethodField(read_only=True)
+    needs_extra_hours = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Task
@@ -328,16 +161,20 @@ class TaskSerializer(serializers.ModelSerializer):
             "project_name",
             "created_by",
             "modified_by",
+            "due_date",
+            "needs_extra_hours",
         ]
         read_only_fields = [
             "created_by",
             "modified_by",
             "consumed_hours",
             "remaining_hours",
+            "needs_extra_hours",
         ]
 
     def get_project_name(self, obj):
         return obj.project.project_name if obj.project else None
+
 
     def get_created_by(self, obj):
         return obj.created_by.username if obj.created_by else None
@@ -350,6 +187,14 @@ class TaskSerializer(serializers.ModelSerializer):
 
     def get_remaining_hours(self, obj):
         return obj.remaining_hours
+
+    def get_needs_extra_hours(self, obj):
+        try:
+            allocated = float(obj.allocated_hours)
+            consumed = float(obj.consumed_hours)
+            return consumed > allocated
+        except Exception:
+            return False
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
