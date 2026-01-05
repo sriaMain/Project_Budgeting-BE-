@@ -15,6 +15,7 @@ from decimal import Decimal
 from django.db.models import Sum
 from django.db.models import F
 from django.shortcuts import get_object_or_404
+from .tasks import send_task_assignment_email
 
 
 
@@ -289,6 +290,10 @@ class TaskAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         task = serializer.save(created_by=request.user)
 
+        # Notify assignee if provided
+        if task.assigned_to_id:
+            send_task_assignment_email.delay(task.id, task.assigned_to_id)
+
         return Response(
             {
                 "message": "Task created successfully",
@@ -338,8 +343,8 @@ class TaskAPIView(APIView):
 
         # Group tasks by project for all cases
         from .redis_utils import get_active_timer
-        def add_live_timer_fields(task, user):
-            data = TaskSerializer(task).data
+        def add_live_timer_fields(task, user, request):
+            data = TaskSerializer(task, context={"request": request}).data
             redis_task, redis_start = get_active_timer(user.id)
             consumed_hours = float(data["consumed_hours"])
             allocated_hours = float(data["allocated_hours"])
@@ -355,7 +360,7 @@ class TaskAPIView(APIView):
             data["needs_extra_hours"] = consumed_hours > allocated_hours
             return data
 
-        def group_tasks_by_project(tasks, user):
+        def group_tasks_by_project(tasks, user, request):
             project_map = {}
             for task in tasks:
                 project = task.project
@@ -370,7 +375,7 @@ class TaskAPIView(APIView):
                         "Tasks": []
                     }
                 # Add full task details (including task_id, etc), with live timer values if running
-                task_data = add_live_timer_fields(task, user)
+                task_data = add_live_timer_fields(task, user, request)
                 task_data["task_id"] = task.id
                 project_map[project_id]["Tasks"].append(task_data)
             return list(project_map.values())
@@ -384,7 +389,7 @@ class TaskAPIView(APIView):
             else:
                 tasks = Task.objects.none()
 
-        grouped = group_tasks_by_project(tasks, user)
+        grouped = group_tasks_by_project(tasks, user, request)
         return Response(
             grouped,
             status=status.HTTP_200_OK
@@ -453,11 +458,17 @@ class TaskAPIView(APIView):
             )
 
         print("PATCH request.data:", request.data)
+        old_assigned_to = task.assigned_to_id
         serializer = TaskSerializer(task, data=request.data, partial=True)
         if not serializer.is_valid():
             print("PATCH serializer.errors:", serializer.errors)
             return Response({"errors": serializer.errors}, status=400)
         serializer.save()
+
+        new_assigned_to = serializer.instance.assigned_to_id
+        if new_assigned_to and new_assigned_to != old_assigned_to:
+            send_task_assignment_email.delay(task.id, new_assigned_to)
+
         return Response({
             "message": "Task updated successfully (partial)",
             "task": serializer.data
@@ -726,6 +737,9 @@ class StartTaskTimerAPIView(APIView):
                 status=403
             )
 
+
+        # 🚫 Restriction removed: allow multiple start/stop cycles for a task timer
+
         # ⏱ Check if another timer is already running
         if has_active_timer(user.id):
             running_task_id, running_start = get_active_timer(user.id)
@@ -737,17 +751,32 @@ class StartTaskTimerAPIView(APIView):
                 except Task.DoesNotExist:
                     pass
 
-            return Response(
-                {
-                    "error": "Another timer is already running",
-                    "running_task": {
-                        "id": int(running_task_id),
-                        "title": running_task.title if running_task else None,
-                        "started_at": running_start.decode() if running_start else None,
-                    }
-                },
-                status=400
-            )
+            if int(running_task_id) == task.id:
+                return Response(
+                    {
+                        "error": "Timer is already running for this task. Please pause or stop it before starting again.",
+                        "running_task": {
+                            "id": int(running_task_id),
+                            "title": running_task.title if running_task else None,
+                            "started_at": running_start.decode() if running_start else None,
+                        },
+                        "action": "pause_or_stop"
+                    },
+                    status=400
+                )
+            else:
+                return Response(
+                    {
+                        "error": "Another timer is already running",
+                        "running_task": {
+                            "id": int(running_task_id),
+                            "title": running_task.title if running_task else None,
+                            "started_at": running_start.decode() if running_start else None,
+                        },
+                        "action": "switch_task"
+                    },
+                    status=400
+                )
 
         # ▶️ START TIMER
         timer = TaskTimerLog.objects.create(
@@ -759,6 +788,11 @@ class StartTaskTimerAPIView(APIView):
 
         set_active_timer(user.id, task.id, timer.start_time)
 
+        # Calculate previously worked seconds for this task and user
+        previous_logs = TaskTimerLog.objects.filter(task=task, user=user, is_active=False)
+        prev_seconds = sum([(log.end_time - log.start_time).total_seconds() for log in previous_logs if log.end_time and log.start_time])
+        prev_seconds = int(prev_seconds)
+
         # 🔥 WebSocket Event
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
@@ -769,6 +803,9 @@ class StartTaskTimerAPIView(APIView):
                     "event": "TIMER_STARTED",
                     "task_id": task.id,
                     "started_at": timer.start_time.isoformat(),
+                    "total_seconds": 0,
+                    "running": True,
+                    "previous_total_seconds": prev_seconds
                 }
             }
         )
@@ -867,6 +904,34 @@ class PauseTaskTimerAPIView(APIView):
 
         # ✅ Clear redis timer state so user can start a new timer
         clear_active_timer(user.id)
+
+        # 🔥 WebSocket Event for timer paused
+        def format_seconds(seconds):
+            h = seconds // 3600
+            m = (seconds % 3600) // 60
+            s = seconds % 60
+            return f"{h:02}:{m:02}:{s:02}", h, m, s
+
+        formatted, hours, minutes, seconds = format_seconds(elapsed_seconds)
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"user_{user.id}",
+            {
+                "type": "timer_event",
+                "data": {
+                    "event": "TIMER_PAUSED",
+                    "task_id": task.id,
+                    "started_at": timer.start_time.isoformat() if timer.start_time else None,
+                    "total_seconds": elapsed_seconds,
+                    "running": False,
+                    "formatted_time": formatted,
+                    "hours": hours,
+                    "minutes": minutes,
+                    "seconds": seconds
+                }
+            }
+        )
 
         return Response({
             "message": "Timer paused",

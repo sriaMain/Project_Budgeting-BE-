@@ -146,6 +146,9 @@ class TaskSerializer(serializers.ModelSerializer):
     consumed_hours = serializers.SerializerMethodField(read_only=True)
     remaining_hours = serializers.SerializerMethodField(read_only=True)
     needs_extra_hours = serializers.SerializerMethodField(read_only=True)
+    total_seconds = serializers.SerializerMethodField(read_only=True)
+    running = serializers.SerializerMethodField(read_only=True)
+    started_at = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Task
@@ -163,6 +166,9 @@ class TaskSerializer(serializers.ModelSerializer):
             "modified_by",
             "due_date",
             "needs_extra_hours",
+            "total_seconds",
+            "running",
+            "started_at",
         ]
         read_only_fields = [
             "created_by",
@@ -170,6 +176,9 @@ class TaskSerializer(serializers.ModelSerializer):
             "consumed_hours",
             "remaining_hours",
             "needs_extra_hours",
+            "total_seconds",
+            "running",
+            "started_at",
         ]
 
     def get_project_name(self, obj):
@@ -195,6 +204,44 @@ class TaskSerializer(serializers.ModelSerializer):
             return consumed > allocated
         except Exception:
             return False
+
+    def get_total_seconds(self, obj):
+        request = self.context.get('request')
+        if not request or not hasattr(request, 'user'):
+            return None
+        from Project.redis_utils import get_active_timer
+        from Project.models import TaskTimerLog
+        user = request.user
+        # Sum all previous logs for this user and task
+        previous_logs = TaskTimerLog.objects.filter(task=obj, user=user, is_active=False)
+        prev_seconds = sum([(log.end_time - log.start_time).total_seconds() for log in previous_logs if log.end_time and log.start_time])
+        prev_seconds = int(prev_seconds)
+        # If running, add current session
+        redis_task, redis_start = get_active_timer(user.id)
+        if redis_task and int(redis_task) == obj.id and redis_start:
+            from django.utils import timezone
+            start_time = timezone.datetime.fromisoformat(redis_start.decode())
+            elapsed_seconds = int((timezone.now() - start_time).total_seconds())
+            return prev_seconds + elapsed_seconds
+        return prev_seconds
+
+    def get_running(self, obj):
+        request = self.context.get('request')
+        if not request or not hasattr(request, 'user'):
+            return False
+        from Project.redis_utils import get_active_timer
+        redis_task, _ = get_active_timer(request.user.id)
+        return bool(redis_task and int(redis_task) == obj.id)
+
+    def get_started_at(self, obj):
+        request = self.context.get('request')
+        if not request or not hasattr(request, 'user'):
+            return None
+        from Project.redis_utils import get_active_timer
+        redis_task, redis_start = get_active_timer(request.user.id)
+        if redis_task and int(redis_task) == obj.id and redis_start:
+            return redis_start.decode()
+        return None
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
