@@ -1,0 +1,19 @@
+[33m3417ef5[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32msri[m[33m, [m[1;31morigin/sri[m[33m)[m HEAD@{0}: checkout: moving from main to sri
+[33m4264a1e[m[33m ([m[1;32mmain[m[33m)[m HEAD@{1}: commit: 05/01/2026
+[33mdf194ca[m[33m ([m[1;31morigin/main[m[33m)[m HEAD@{2}: pull origin main: Fast-forward
+[33m8a91c5b[m HEAD@{3}: reset: moving to HEAD
+[33m8a91c5b[m HEAD@{4}: reset: moving to HEAD
+[33m8a91c5b[m HEAD@{5}: reset: moving to HEAD
+[33m8a91c5b[m HEAD@{6}: pull origin main: Fast-forward
+[33m793d168[m HEAD@{7}: reset: moving to HEAD
+[33m793d168[m HEAD@{8}: pull origin main: Fast-forward
+[33mf8a474a[m HEAD@{9}: reset: moving to HEAD
+[33mf8a474a[m HEAD@{10}: pull origin main: Fast-forward
+[33ma5fab56[m HEAD@{11}: commit: 05/12/25
+[33m32b5fb6[m HEAD@{12}: commit: 4/12/25 updated code
+[33m0528739[m HEAD@{13}: commit: updated code 03/12/25
+[33m273296b[m HEAD@{14}: commit: updated code 03/12/25
+[33m95685f4[m HEAD@{15}: commit: updated code 03/12/25
+[33m525dbae[m HEAD@{16}: commit: Updated code 03/12/25
+[33m7d68336[m HEAD@{17}: commit: Updated code 03/12/25
+[33m26c2746[m HEAD@{18}: clone: from github.com:sriaMain/Project_Budgeting-BE-.git
