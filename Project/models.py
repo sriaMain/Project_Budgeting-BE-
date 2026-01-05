@@ -39,7 +39,13 @@ class Project(models.Model):
     start_date = models.DateField()
     end_date = models.DateField()
     project_manager = models.ForeignKey('accounts.Account', on_delete=models.SET_NULL, null=True, blank=True)
-    created_from_quotation = models.ForeignKey('product_group.Quote', on_delete=models.SET_NULL, null=True, blank=True)
+    created_from_quotation = models.OneToOneField(
+        'product_group.Quote',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='project'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
 
@@ -63,7 +69,19 @@ class Project(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
+
+
         return f"{self.project_name} ({self.project_no})"
+    
+    def clean(self):
+        if self.project_type == 'external' and not self.created_from_quotation:
+            raise ValidationError(_("Quotation is required for external projects."))
+
+
+    def save(self, *args, **kwargs):
+        self.full_clean()  # Enforces clean()
+        super().save(*args, **kwargs)
+
 
 
 

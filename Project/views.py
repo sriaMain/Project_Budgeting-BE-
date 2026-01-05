@@ -263,7 +263,7 @@ class ProjectBudgetAPIView(APIView):
             status=status.HTTP_204_NO_CONTENT
         )
 
-
+from django.shortcuts import get_object_or_404
 class TaskAPIView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
@@ -1020,7 +1020,10 @@ class TaskStatusChoicesView(APIView):
     def get(self, request):
         status_choices = [choice[0] for choice in Task.STATUS_CHOICES]
         return Response({"status_choices": status_choices})
-    
+
+from collections import defaultdict
+
+
 
 class TaskGroupedByStatusAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1051,5 +1054,7 @@ class TaskGroupedByStatusAPIView(APIView):
             serialized = TaskSerializer(task).data
             response_data[task.status]["tasks"].append(serialized)
             response_data[task.status]["count"] += 1
+            return Response(response_data)
 
         return Response(response_data)
+

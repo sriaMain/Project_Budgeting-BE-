@@ -94,7 +94,11 @@ INSTALLED_APPS = [
     'roles',
     'client',
     'Project',
+
     "channels",
+
+    'finances',
+
     
 ]
 ASGI_APPLICATION = "myproject.asgi.application"

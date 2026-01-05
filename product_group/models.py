@@ -116,7 +116,12 @@ class QuoteItem(models.Model):
     quote = models.ForeignKey(Quote, on_delete=models.CASCADE, related_name='items')
     
     # The product/service chosen for this line
-    product_service = models.ForeignKey(Product_Services, on_delete=models.SET_NULL, null=True)
+    product_service = models.ForeignKey(
+        Product_Services,
+        on_delete=models.PROTECT,
+        null=False,
+        blank=False
+    )
     
     # You can override the default description
     description = models.TextField(blank=True)
@@ -134,9 +139,8 @@ class QuoteItem(models.Model):
     bill_number = models.CharField(max_length=50, blank=True, null=True)
 
     def save(self, *args, **kwargs):
-        # Automatically calculate the amount before saving
+        self.full_clean()  # 🔒 enforce validation
         self.amount = self.quantity * self.price_per_unit
         super().save(*args, **kwargs)
-
     def __str__(self):
         return f"Item for Quote {self.quote.quote_no}: {self.product_service.product_service_name}"
