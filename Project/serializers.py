@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog, TaskExtraHoursRequest
+from .models import (Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog,
+                      TaskExtraHoursRequest)
 from django.core.exceptions import ObjectDoesNotExist
 from accounts.models import Account
 
@@ -130,7 +131,7 @@ class ProjectListSerializer(serializers.ModelSerializer):
     
 
 class TaskSerializer(serializers.ModelSerializer):
-    due_date = serializers.DateField(required=True)
+    # due_date = serializers.DateField(required=True)
     created_by = serializers.SerializerMethodField(read_only=True)
     modified_by = serializers.SerializerMethodField(read_only=True)
     assigned_to = serializers.PrimaryKeyRelatedField(
@@ -149,6 +150,13 @@ class TaskSerializer(serializers.ModelSerializer):
     total_seconds = serializers.SerializerMethodField(read_only=True)
     running = serializers.SerializerMethodField(read_only=True)
     started_at = serializers.SerializerMethodField(read_only=True)
+    is_stopped = serializers.SerializerMethodField(read_only=True)
+    stop_reason = serializers.SerializerMethodField(read_only=True)
+    stopped_at = serializers.SerializerMethodField(read_only=True)
+    remaining_seconds = serializers.SerializerMethodField(read_only=True)
+    remaining_formatted = serializers.SerializerMethodField(read_only=True)
+    exceeded_by_seconds = serializers.SerializerMethodField(read_only=True)
+    exceeded_formatted = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Task
@@ -169,6 +177,13 @@ class TaskSerializer(serializers.ModelSerializer):
             "total_seconds",
             "running",
             "started_at",
+            "is_stopped",
+            "stop_reason",
+            "stopped_at",
+            "remaining_seconds",
+            "remaining_formatted",
+            "exceeded_by_seconds",
+            "exceeded_formatted",
         ]
         read_only_fields = [
             "created_by",
@@ -179,6 +194,13 @@ class TaskSerializer(serializers.ModelSerializer):
             "total_seconds",
             "running",
             "started_at",
+            "is_stopped",
+            "stop_reason",
+            "stopped_at",
+            "remaining_seconds",
+            "remaining_formatted",
+            "exceeded_by_seconds",
+            "exceeded_formatted",
         ]
 
     def get_project_name(self, obj):
@@ -242,6 +264,92 @@ class TaskSerializer(serializers.ModelSerializer):
         if redis_task and int(redis_task) == obj.id and redis_start:
             return redis_start.decode()
         return None
+
+    def get_is_stopped(self, obj):
+        """Check if task has been stopped today (has timesheet entry for today)"""
+        request = self.context.get('request')
+        if not request or not hasattr(request, 'user'):
+            return False
+        from django.utils import timezone
+        from Project.models import TimesheetEntry
+        today = timezone.now().date()
+        return TimesheetEntry.objects.filter(
+            timesheet__user=request.user,
+            task=obj,
+            date=today
+        ).exists()
+
+    def _get_time_stats(self, obj):
+        """Compute stop metadata for serializer consumers"""
+        request = self.context.get('request')
+        if not request or not hasattr(request, 'user'):
+            return None
+
+        from Project.models import TaskTimerLog
+        from Project.utils import format_seconds
+
+        logs = TaskTimerLog.objects.filter(
+            task=obj,
+            user=request.user,
+            is_active=False,
+            end_time__isnull=False,
+            start_time__isnull=False
+        )
+
+        if not logs.exists():
+            return {
+                "total_seconds": 0,
+                "stopped_at": None,
+                "stop_reason": None,
+                "remaining_seconds": int(float(obj.allocated_hours) * 3600),
+                "remaining_formatted": format_seconds(float(obj.allocated_hours) * 3600)["formatted"],
+                "exceeded_by_seconds": 0,
+                "exceeded_formatted": "00:00:00",
+            }
+
+        total_seconds = int(sum((log.end_time - log.start_time).total_seconds() for log in logs))
+        last_log = logs.order_by("-end_time").first()
+        allocated_seconds = int(float(obj.allocated_hours) * 3600)
+        remaining_seconds = max(allocated_seconds - total_seconds, 0)
+        exceeded_by_seconds = max(total_seconds - allocated_seconds, 0)
+
+        stop_reason = None
+        if not self.get_running(obj):
+            stop_reason = "AUTO" if exceeded_by_seconds > 0 else "COMPLETED"
+
+        return {
+            "total_seconds": total_seconds,
+            "stopped_at": last_log.end_time.isoformat() if last_log and last_log.end_time else None,
+            "stop_reason": stop_reason,
+            "remaining_seconds": remaining_seconds,
+            "remaining_formatted": format_seconds(remaining_seconds)["formatted"],
+            "exceeded_by_seconds": exceeded_by_seconds,
+            "exceeded_formatted": format_seconds(exceeded_by_seconds)["formatted"],
+        }
+
+    def get_stop_reason(self, obj):
+        stats = self._get_time_stats(obj)
+        return stats.get("stop_reason") if stats else None
+
+    def get_stopped_at(self, obj):
+        stats = self._get_time_stats(obj)
+        return stats.get("stopped_at") if stats else None
+
+    def get_remaining_seconds(self, obj):
+        stats = self._get_time_stats(obj)
+        return stats.get("remaining_seconds") if stats else None
+
+    def get_remaining_formatted(self, obj):
+        stats = self._get_time_stats(obj)
+        return stats.get("remaining_formatted") if stats else None
+
+    def get_exceeded_by_seconds(self, obj):
+        stats = self._get_time_stats(obj)
+        return stats.get("exceeded_by_seconds") if stats else None
+
+    def get_exceeded_formatted(self, obj):
+        stats = self._get_time_stats(obj)
+        return stats.get("exceeded_formatted") if stats else None
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)

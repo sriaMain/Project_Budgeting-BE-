@@ -136,19 +136,28 @@ class Task(models.Model):
     def __str__(self):
         return self.title
 
-    # @property
-    # def consumed_hours(self):
-    #     return self.time_entries.aggregate(
-    #         total=models.Sum('hours')
-    #     )['total'] or 0
-
     @property
     def consumed_hours(self):
-        return self.time_entries.aggregate(
-            total=models.Sum('hours')
-        )['total'] or 0
-
-
+        """Calculate consumed hours from TaskTimerLog (real-time tracking)"""
+        from django.db.models import Sum, Q
+        from decimal import Decimal
+        
+        # Get all completed timer logs for this task
+        timer_logs = TaskTimerLog.objects.filter(
+            task=self,
+            is_active=False,
+            end_time__isnull=False,
+            start_time__isnull=False
+        )
+        
+        total_seconds = 0
+        for log in timer_logs:
+            duration = (log.end_time - log.start_time).total_seconds()
+            total_seconds += duration
+        
+        # Convert seconds to hours
+        hours = Decimal(total_seconds) / Decimal(3600)
+        return hours
 
     @property
     def remaining_hours(self):
@@ -217,6 +226,17 @@ class TaskTimerLog(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.task} - {self.duration_minutes} mins"
+    
+    @staticmethod
+    def get_total_seconds(task, user):
+        logs = TaskTimerLog.objects.filter(task=task, user=user)
+        total = 0
+        for log in logs:
+            if log.end_time:
+                total += (log.end_time - log.start_time).total_seconds()
+            else:
+                total += (timezone.now() - log.start_time).total_seconds()
+        return int(total)
 
 
 class TaskExtraHoursRequest(models.Model):

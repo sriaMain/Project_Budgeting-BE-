@@ -382,11 +382,43 @@ class UserDetailVieW(APIView):
 
             # 🔥 Update roles manually (IMPORTANT)
             if "roles" in request.data:
-                user.roles.set(request.data["roles"])
+                from roles.models import Role
+                role_ids = request.data["roles"]
+                
+                # Ensure role_ids is a list
+                if not isinstance(role_ids, list):
+                    role_ids = [role_ids]
+                
+                # Convert to integers if they're strings
+                try:
+                    role_ids = [int(rid) for rid in role_ids]
+                except (ValueError, TypeError):
+                    return Response({
+                        "error": "Invalid role IDs format",
+                        "details": "Role IDs must be integers"
+                    }, status=400)
+                
+                # Validate that all role IDs exist
+                existing_roles = Role.objects.filter(id__in=role_ids)
+                if existing_roles.count() != len(role_ids):
+                    invalid_ids = set(role_ids) - set(existing_roles.values_list('id', flat=True))
+                    return Response({
+                        "error": "Invalid role IDs",
+                        "invalid_ids": list(invalid_ids)
+                    }, status=400)
+                
+                user.roles.set(role_ids)
 
             cache.delete("users_list")
 
             return Response(serializer.data, status=200)
+
+        except IntegrityError as e:
+            logger.error(f"UserDetailView IntegrityError: {str(e)}", exc_info=True)
+            return Response({
+                "error": "Foreign key constraint failed",
+                "details": "One or more related records (roles, module, etc.) do not exist"
+            }, status=400)
 
         except DRFValidationError as e:
             errors = format_validation_errors(e.detail)
