@@ -1,13 +1,15 @@
 # urls.py
 from django.urls import path
 from . import views
+from django.http import HttpResponse
 
 from .views import (QuotationDetailView, InvoiceListView, InvoiceDetailView,
                     GenerateInvoiceView, RecordPaymentView, InvoicePaymentListView,  
                     DownloadInvoicePDFView, SendInvoiceEmailView, CancelInvoiceView,
-                    InvoiceShareableLinkView, PublicInvoiceView, InvoiceStatisticsView)
+                    InvoiceShareableLinkView, PublicInvoiceView, InvoiceStatisticsView, DownloadInvoicePDFView,PublicInvoicePDFView,ShareInvoiceLinkView)
 
 urlpatterns = [
+    path("test/", lambda r: HttpResponse("FINANCES OK")),
     # Quotation
     path('quotations/<int:pk>/', QuotationDetailView.as_view(),name='quotation-detail'),
    
@@ -33,9 +35,9 @@ urlpatterns = [
 #     path('invoices/<int:invoice_id>/milestones/',InvoiceMilestoneListView.as_view(), 
 #          name='invoice-milestones'),
     
-    # PDF & Email
-    path('invoices/<int:invoice_id>/pdf/',DownloadInvoicePDFView.as_view(), 
-         name='invoice-download-pdf'),
+#     # PDF & Email
+#     path('invoices/<int:invoice_id>/pdf/',DownloadInvoicePDFView.as_view(), 
+#          name='invoice-download-pdf'),
     
     path('invoices/<int:invoice_id>/send-email/',SendInvoiceEmailView.as_view(), 
          name='invoice-send-email'),
@@ -54,6 +56,26 @@ urlpatterns = [
     # Statistics
     path('invoices/statistics/',InvoiceStatisticsView.as_view(), 
          name='invoice-statistics'),
+
+#     path(
+#         "invoices/<int:invoice_id>/send-email/",
+#         SendInvoiceEmailView.as_view(),
+#         name="send-invoice-email"
+#     ),
+    path(
+        "invoices/<int:invoice_id>/download/",
+        DownloadInvoicePDFView.as_view(),
+        name="download-invoice"
+    ),
+    path(
+        "public/invoice/<str:token>/",
+        PublicInvoicePDFView.as_view(),
+        name="public-invoice-pdf"
+    ),
+    path(
+        "invoices/<int:invoice_id>/share-link/",
+        ShareInvoiceLinkView.as_view()
+    ),
 ]
 
 

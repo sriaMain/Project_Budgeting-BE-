@@ -49,38 +49,43 @@ class Project(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
 
-    def save(self, *args, **kwargs):
-        # Auto-generate project number if not set
-        # if not self.project_no:
-        # 	from datetime import datetime
-        # 	today = datetime.now().strftime('%Y%m%d')
-        # 	last = Project.objects.filter(project_no__startswith=f'PRJ-{today}').count() + 1
-        # 	self.project_no = f'PRJ-{today}-{last:03d}'
+    # def save(self, *args, **kwargs):
+    #     # Auto-generate project number if not set
+    #     # if not self.project_no:
+    #     # 	from datetime import datetime
+    #     # 	today = datetime.now().strftime('%Y%m%d')
+    #     # 	last = Project.objects.filter(project_no__startswith=f'PRJ-{today}').count() + 1
+    #     # 	self.project_no = f'PRJ-{today}-{last:03d}'
 
-        # Auto-assign client and project_manager from quotation if available
-        if self.created_from_quotation:
-            if hasattr(self.created_from_quotation, 'client'):
-                self.client = self.created_from_quotation.client
-            if hasattr(self.created_from_quotation, 'project_manager'):
-                self.project_manager = self.created_from_quotation.project_manager
+    #     # Auto-assign client and project_manager from quotation if available
+    #     if self.created_from_quotation:
+    #         if hasattr(self.created_from_quotation, 'client'):
+    #             self.client = self.created_from_quotation.client
+    #         if hasattr(self.created_from_quotation, 'project_manager'):
+    #             self.project_manager = self.created_from_quotation.project_manager
+
+    #     if self.end_date < self.start_date:
+    #         raise ValidationError(_('End date cannot be before start date.'))
+    #     super().save(*args, **kwargs)
+
+    def clean(self):
+        if self.project_type == 'external' and not self.created_from_quotation:
+            raise ValidationError("Quotation is required for external projects.")
+
+    def save(self, *args, **kwargs):
+        # ✅ AUTO-ASSIGN CLIENT FROM QUOTATION
+        if self.created_from_quotation and not self.client:
+            self.client = self.created_from_quotation.client
 
         if self.end_date < self.start_date:
-            raise ValidationError(_('End date cannot be before start date.'))
+            raise ValidationError("End date cannot be before start date.")
+
+        self.full_clean()
         super().save(*args, **kwargs)
 
     def __str__(self):
-
-
         return f"{self.project_name} ({self.project_no})"
     
-    def clean(self):
-        if self.project_type == 'external' and not self.created_from_quotation:
-            raise ValidationError(_("Quotation is required for external projects."))
-
-
-    def save(self, *args, **kwargs):
-        self.full_clean()  # Enforces clean()
-        super().save(*args, **kwargs)
 
 
 
@@ -154,11 +159,19 @@ class Task(models.Model):
     def __str__(self):
         return self.title
 
+    # @property
+    # def consumed_hours(self):
+    #     return self.time_entries.aggregate(
+    #         total=models.Sum('hours')
+    #     )['total'] or 0
+
     @property
     def consumed_hours(self):
         return self.time_entries.aggregate(
             total=models.Sum('hours')
         )['total'] or 0
+
+
 
     @property
     def remaining_hours(self):

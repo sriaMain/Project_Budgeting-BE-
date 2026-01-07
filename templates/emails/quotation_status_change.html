@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quotation Status Update</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .email-container {
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            background-color: #42a5f5;
+            color: white;
+            padding: 20px;
+            border-radius: 8px 8px 0 0;
+            margin: -30px -30px 20px -30px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .status-change {
+            background-color: #f9f9f9;
+            border-left: 4px solid #42a5f5;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .status-old {
+            background-color: #ff9800;
+            color: white;
+        }
+        .status-new {
+            background-color: #42a5f5;
+            color: white;
+        }
+        .status-separator {
+            margin: 0 10px;
+        }
+        .status-label {
+            margin: 0 0 10px 0;
+        }
+        .quotation-title {
+            color: #333;
+            border-bottom: 2px solid #42a5f5;
+            padding-bottom: 10px;
+        }
+        .alert-confirmed {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .alert-confirmed p {
+            margin: 0;
+            color: #1565c0;
+        }
+        .alert-rejected {
+            background-color: #ffebee;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .alert-rejected p {
+            margin: 0;
+            color: #c62828;
+        }
+        .alert-cancelled {
+            background-color: #fafafa;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .alert-cancelled p {
+            margin: 0;
+            color: #616161;
+        }
+        .alert-closed {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .alert-closed p {
+            margin: 0;
+            color: #1565c0;
+        }
+        .details-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .details-table td {
+            padding: 10px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .details-table td:first-child {
+            font-weight: bold;
+            width: 40%;
+            color: #666;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            font-size: 12px;
+            color: #666;
+            text-align: center;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #42a5f5;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>📋 Quotation Status Update</h1>
+        </div>
+        
+        <p>Dear Recipient,</p>
+        
+        <p>The status of quotation <strong>#{{ quote_no }}</strong> has been updated.</p>
+        
+        <div class="status-change">
+            <p class="status-label"><strong>Status Change:</strong></p>
+            <span class="status-badge status-old">{{ old_status }}</span>
+            <span class="status-separator">→</span>
+            <span class="status-badge status-new">{{ new_status }}</span>
+        </div>
+        
+        <h2 class="quotation-title">Quotation Details</h2>
+        
+        <table class="details-table">
+            <tr>
+                <td>Quote Number:</td>
+                <td><strong>#{{ quote_no }}</strong></td>
+            </tr>
+            <tr>
+                <td>Quote Name:</td>
+                <td>{{ quote_name }}</td>
+            </tr>
+            <tr>
+                <td>Client:</td>
+                <td>{{ client_name }}</td>
+            </tr>
+            <tr>
+                <td>Total Amount:</td>
+                <td><strong>{{ total_amount_display }}</strong></td>
+            </tr>
+            <tr>
+                <td>Date of Issue:</td>
+                <td>{{ date_of_issue|date:"F d, Y" }}</td>
+            </tr>
+            <tr>
+                <td>Due Date:</td>
+                <td>{{ due_date|date:"F d, Y" }}</td>
+            </tr>
+        </table>
+        
+        {% if new_status == 'Confirmed' %}
+        <div class="alert-confirmed">
+            <p><strong>✓ Congratulations!</strong> This quotation has been confirmed and can now be used to create a project.</p>
+        </div>
+        {% elif new_status == 'Rejected' %}
+        <div class="alert-rejected">
+            <p><strong>✗ Rejected:</strong> This quotation has been rejected.</p>
+        </div>
+        {% elif new_status == 'Cancelled' %}
+        <div class="alert-cancelled">
+            <p><strong>⊘ Cancelled:</strong> This quotation has been cancelled.</p>
+        </div>
+        {% elif new_status == 'Closed' %}
+        <div class="alert-closed">
+            <p><strong>✓ Closed:</strong> This quotation has been closed.</p>
+        </div>
+        {% endif %}
+        
+        <div class="footer">
+            <p>This is an automated notification from the Project Budgeting System.</p>
+            <p>Please do not reply to this email.</p>
+            <p>&copy; 2026 Project Budgeting System. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>

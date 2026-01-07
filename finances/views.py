@@ -9,7 +9,8 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.db.models import Q, Sum, Count
 from django.utils import timezone
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
+from io import BytesIO
 from datetime import timedelta, datetime
 from decimal import Decimal
 
@@ -23,7 +24,12 @@ from .serializers import (
 from .services import InvoiceService
 from django.core.exceptions import ValidationError
 from product_group.models import Quote
-
+from django.http import Http404
+from django.conf import settings
+from .tasks import send_invoice_email
+from .utils import validate_invoice_token
+from django.template.loader import render_to_string
+from xhtml2pdf import pisa
 class QuotationDetailView(APIView):
     """
     Get quotation details with invoice generation capability
@@ -78,7 +84,7 @@ class InvoiceListView(APIView):
         # Base queryset
         queryset = Invoice.objects.select_related(
             'client', 'quote', 'project', 'created_by'
-        ).prefetch_related('items', 'payments', 'milestones')
+        ).prefetch_related('items', 'payments')
         
         # Apply filters
         status_filter = request.query_params.get('status')
@@ -146,7 +152,7 @@ class InvoiceDetailView(APIView):
     def get(self, request, invoice_id):
         invoice = get_object_or_404(
             Invoice.objects.select_related('client', 'quote', 'project')
-            .prefetch_related('items', 'payments', 'milestones'),
+            .prefetch_related('items', 'payments'),
             id=invoice_id
         )
         
@@ -167,21 +173,32 @@ class InvoiceDetailView(APIView):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
+  
     def delete(self, request, invoice_id):
-        invoice = get_object_or_404(Invoice, id=invoice_id)
-        
-        # Check if invoice can be deleted
-        if invoice.paid_amount > 0:
+        invoice = get_object_or_404(Invoice, pk=invoice_id)
+
+        # ✅ BLOCK DELETE IF PAYMENTS EXIST
+        if invoice.payments.exists():
             return Response(
-                {'error': 'Cannot delete invoice with payments'},
+                {
+                    "error": "Invoice has payments and cannot be deleted"
+                },
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
+        # ✅ DELETE PDF FILE IF EXISTS
+        if invoice.pdf_file:
+            invoice.pdf_file.delete(save=False)
+
+        # ✅ DELETE INVOICE
         invoice.delete()
+
         return Response(
-            {'message': 'Invoice deleted successfully'},
+            {"message": "Invoice deleted successfully"},
             status=status.HTTP_204_NO_CONTENT
         )
+        
+
 class GenerateInvoiceView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
@@ -201,30 +218,12 @@ class GenerateInvoiceView(APIView):
             pk=serializer.validated_data["quote_id"]
         )
 
-        milestone_data = None
-        if serializer.validated_data.get("include_milestones"):
-            milestone_data = []
-            for m in serializer.validated_data.get("milestones", []):
-                milestone_data.append({
-                    "title": m["title"],
-                    "percentage": Decimal(str(m["percentage"])),
-                    "due_date": (
-                        datetime.strptime(m["due_date"], "%Y-%m-%d").date()
-                        if isinstance(m["due_date"], str)
-                        else m["due_date"]
-                    ),
-                    "description": m.get("description", ""),
-                })
-
         try:
             invoice = InvoiceService.create_invoice_from_quote(
                 quote=quote,
                 user=request.user,
                 due_days=serializer.validated_data["due_days"],
-                # include_milestones=serializer.validated_data.get(
-                #     "include_milestones", False
-                # ),
-                # milestone_data=milestone_data,
+                product_service_id=serializer.validated_data.get("product_service_id"),
                 notes=serializer.validated_data.get("notes", ""),
                 terms_conditions=serializer.validated_data.get(
                     "terms_conditions", ""
@@ -232,9 +231,8 @@ class GenerateInvoiceView(APIView):
             )
 
         except ValidationError as e:
-            # ✅ IMPORTANT: convert business error to HTTP 400
             return Response(
-                {"error": e.message},
+                {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -247,6 +245,7 @@ class GenerateInvoiceView(APIView):
             },
             status=status.HTTP_201_CREATED
         )
+
 class RecordPaymentView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
@@ -398,54 +397,54 @@ class DownloadInvoicePDFView(APIView):
             )
 
 
-class SendInvoiceEmailView(APIView):
-    """
-    Send invoice via email
+# class SendInvoiceEmailView(APIView):
+#     """
+#     Send invoice via email
     
-    POST /api/invoices/<invoice_id>/send-email/
-    {
-        "recipient_emails": ["client@example.com", "finance@example.com"],
-        "subject": "Invoice #INV-001",
-        "message": "Please find attached invoice...",
-        "include_pdf": true
-    }
-    """
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
+#     POST /api/invoices/<invoice_id>/send-email/
+#     {
+#         "recipient_emails": ["client@example.com", "finance@example.com"],
+#         "subject": "Invoice #INV-001",
+#         "message": "Please find attached invoice...",
+#         "include_pdf": true
+#     }
+#     """
+#     permission_classes = [IsAuthenticated]
+#     authentication_classes = [JWTAuthentication]
     
-    def post(self, request, invoice_id):
-        invoice = get_object_or_404(Invoice, id=invoice_id)
+#     def post(self, request, invoice_id):
+#         invoice = get_object_or_404(Invoice, id=invoice_id)
         
-        serializer = SendInvoiceEmailSerializer(data=request.data)
+#         serializer = SendInvoiceEmailSerializer(data=request.data)
         
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+#         if not serializer.is_valid():
+#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
-        try:
-            # Generate PDF if not exists and include_pdf is True
-            if serializer.validated_data.get('include_pdf', True) and not invoice.pdf_file:
-                InvoiceService.generate_pdf(invoice)
+#         try:
+#             # Generate PDF if not exists and include_pdf is True
+#             if serializer.validated_data.get('include_pdf', True) and not invoice.pdf_file:
+#                 InvoiceService.generate_pdf(invoice)
             
-            # Send email
-            InvoiceService.send_invoice_email(
-                invoice=invoice,
-                recipient_emails=serializer.validated_data['recipient_emails'],
-                subject=serializer.validated_data.get('subject', ''),
-                message=serializer.validated_data.get('message', '')
-            )
+#             # Send email
+#             InvoiceService.send_invoice_email(
+#                 invoice=invoice,
+#                 recipient_emails=serializer.validated_data['recipient_emails'],
+#                 subject=serializer.validated_data.get('subject', ''),
+#                 message=serializer.validated_data.get('message', '')
+#             )
             
-            return Response(
-                {
-                    'message': f'Invoice sent successfully to {", ".join(serializer.validated_data["recipient_emails"])}'
-                },
-                status=status.HTTP_200_OK
-            )
+#             return Response(
+#                 {
+#                     'message': f'Invoice sent successfully to {", ".join(serializer.validated_data["recipient_emails"])}'
+#                 },
+#                 status=status.HTTP_200_OK
+#             )
         
-        except Exception as e:
-            return Response(
-                {'error': f'Error sending email: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+#         except Exception as e:
+#             return Response(
+#                 {'error': f'Error sending email: {str(e)}'},
+#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+#             )
 
 
 class CancelInvoiceView(APIView):
@@ -645,19 +644,105 @@ class InvoiceStatisticsView(APIView):
         serializer = InvoiceStatsSerializer(stats_data)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+class SendInvoiceEmailView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
-# class InvoiceMilestoneListView(APIView):
-#     """
-#     Get milestones for an invoice
-    
-#     GET /api/invoices/<invoice_id>/milestones/
-#     """
-#     permission_classes = [IsAuthenticated]
-#     authentication_classes = [JWTAuthentication]
-    
-#     def get(self, request, invoice_id):
-#         invoice = get_object_or_404(Invoice, id=invoice_id)
-#         milestones = invoice.milestones.all().order_by('milestone_no')
-        
-#         serializer = InvoiceMilestoneSerializer(milestones, many=True)
-#         return Response(serializer.data, status=status.HTTP_200_OK)
+    def post(self, request, invoice_id):
+        invoice = get_object_or_404(Invoice, pk=invoice_id)
+
+        if not invoice.client.email:
+            return Response(
+                {"error": "Client email not found"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        send_invoice_email.delay(invoice.id)
+
+        return Response(
+            {"message": "Invoice email sent successfully"},
+            status=status.HTTP_200_OK
+        )
+
+
+
+from django.shortcuts import get_object_or_404
+from .services import InvoicePDFService
+
+class DownloadInvoicePDFView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    def get(self, request, invoice_id):
+        invoice = get_object_or_404(Invoice, pk=invoice_id)
+
+        # 🔥 FORCE REGENERATE PDF EVERY TIME
+        pdf_path = InvoicePDFService.generate(invoice)
+
+        return FileResponse(
+            open(pdf_path, "rb"),
+            content_type="application/pdf",
+            as_attachment=True,
+            filename=f"Invoice_{invoice.invoice_no}.pdf"
+        )
+
+from django.template.loader import render_to_string
+
+class PublicInvoicePDFView(APIView):
+    permission_classes = []  # 🔓 Public access
+
+    def get(self, request, token):
+
+        # 🔒 STEP 5.1 — token is validated
+        try:
+            data = validate_invoice_token(token)
+            invoice_id = data["invoice_id"]
+        except Exception:
+            raise Http404("Invalid or expired link")
+
+        # 📦 STEP 5.2 — invoice fetched
+        invoice = Invoice.objects.get(pk=invoice_id)
+
+        # 🧾 STEP 5.3 — HTML rendered
+        html = render_to_string(
+            "quote_invoice.html",
+            {"invoice": invoice}
+        )
+
+        # 📄 STEP 5.4 — PDF generated
+        pdf_buffer = BytesIO()
+        pisa.CreatePDF(html, pdf_buffer)
+
+        # 🌐 STEP 5.5 — PDF opened in browser
+        return HttpResponse(
+            pdf_buffer.getvalue(),
+            content_type="application/pdf",
+            headers={
+                "Content-Disposition":
+                f'inline; filename="Invoice_{invoice.invoice_no}.pdf"'
+            }
+        )
+
+
+from .utils import generate_invoice_token
+class ShareInvoiceLinkView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    """
+    Called when user clicks 'Share via link'
+    """
+
+    def post(self, request, invoice_id):
+        invoice = get_object_or_404(Invoice, pk=invoice_id)
+
+        # 🔑 STEP 3.1 — token is generated HERE
+        token = generate_invoice_token(invoice.id)
+
+        # 🔗 STEP 3.2 — token is placed inside URL
+        public_link = (
+            f"{settings.FRONTEND_BASE_URL}/public/invoice/{token}/"
+        )
+
+        # 🔁 STEP 3.3 — link is returned
+        return Response({
+            "public_invoice_link": public_link
+        })

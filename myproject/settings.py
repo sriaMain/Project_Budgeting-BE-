@@ -315,8 +315,12 @@ EMAIL_HOST_USER = 'teerdavenigedela@gmail.com'
 EMAIL_HOST_PASSWORD = 'vcig blpb lbdg sact'  # Gmail App Password
 DEFAULT_FROM_EMAIL = "teerdavenigedela@gmail.com"
 
+
+
 CELERY_BROKER_URL = 'redis://localhost:6379/0'
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
+
+APPEND_SLASH=False 

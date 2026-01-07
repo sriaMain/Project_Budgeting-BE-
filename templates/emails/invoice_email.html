@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice {{ invoice.invoice_no }}</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #f4f6f8;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+        .email-container {
+            padding: 20px;
+        }
+        .email-wrapper {
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .email-header {
+            background: #3f8edb;
+            color: #fff;
+            padding: 20px;
+        }
+        .email-header h2 {
+            margin: 0;
+        }
+        .email-header p {
+            margin: 5px 0 0 0;
+            font-size: 13px;
+        }
+        .email-body {
+            padding: 20px;
+            color: #333;
+            font-size: 14px;
+        }
+        .invoice-details {
+            background: #f8f9fb;
+            border-radius: 6px;
+            width: 100%;
+        }
+        .invoice-details td {
+            padding: 8px;
+        }
+        .cta-button {
+            text-align: center;
+            margin: 25px 0;
+        }
+        .cta-button a {
+            background: #3f8edb;
+            color: #fff;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            color: #999;
+            border-top: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+<div class="email-container">
+    <div class="email-wrapper">
+        <div class="email-header">
+            <h2>Invoice {{ invoice.invoice_no }}</h2>
+            <p>SRIA INFOTECH PRIVATE LTD</p>
+        </div>
+
+        <div class="email-body">
+            <p>Dear <strong>{{ invoice.client.company_name }}</strong>,</p>
+
+            <p>
+                Thank you for your business.  
+                Please find your invoice details below. The PDF invoice is attached.
+            </p>
+
+            <table class="invoice-details">
+                <tr><td><b>Invoice No</b></td><td align="right">{{ invoice.invoice_no }}</td></tr>
+                <tr><td><b>Issue Date</b></td><td align="right">{{ invoice.issue_date }}</td></tr>
+                <tr><td><b>Due Date</b></td><td align="right">{{ invoice.due_date }}</td></tr>
+                <tr><td><b>Total Amount</b></td><td align="right">₹ {{ invoice.total_amount }}</td></tr>
+                <tr><td><b>Balance Due</b></td><td align="right">₹ {{ invoice.balance_amount }}</td></tr>
+            </table>
+
+            <div class="cta-button">
+                <a href="{{ invoice_link }}">View Invoice</a>
+            </div>
+
+            <p>
+                If you have any questions about this invoice, please don't hesitate to contact us.
+            </p>
+
+            <p>
+                Best regards,<br/>
+                <strong>SRIA INFOTECH PRIVATE LTD</strong><br/>
+                hr@sriainfotech.com
+            </p>
+        </div>
+
+        <div class="footer">
+            <p>© 2026 SRIA INFOTECH PRIVATE LTD. All rights reserved.</p>
+        </div>
+    </div>
+</div>
+</body>
+</html>

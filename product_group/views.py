@@ -17,7 +17,7 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
-from .tasks import send_quote_email
+from .tasks import send_quote_email, send_quotation_status_change_email
 
 class ProductGroupListCreateView(APIView):
     authentication_classes = [JWTAuthentication]
@@ -236,13 +236,50 @@ class QuoteDetailView(APIView):
         serializer = QuoteDetailSerializer(quote)
         return Response(serializer.data)
 
+    # def put(self, request, pk):
+    #     quote = self.get_object(pk)
+    #     serializer = QuoteSerializer(quote, data=request.data, partial=True)
+    #     if serializer.is_valid():
+    #         serializer.save(modified_by=request.user)
+    #         return Response(serializer.data)
+    #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+   
+
     def put(self, request, pk):
         quote = self.get_object(pk)
+
+        # 🔹 STEP 1: store old status BEFORE update
+        old_status = quote.status
+
         serializer = QuoteSerializer(quote, data=request.data, partial=True)
         if serializer.is_valid():
+            requested_status = serializer.validated_data.get('status')
+
+            # Block no-op status updates if the same status is explicitly sent
+            if requested_status is not None and requested_status == old_status:
+                return Response(
+                    {"error": f"Status is already '{old_status}'. No change applied."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             serializer.save(modified_by=request.user)
+
+            # 🔹 STEP 2: check status AFTER update
+            new_status = serializer.instance.status
+
+            # 🔥 STEP 3: trigger Celery task ONLY if status changed
+            if old_status != new_status:
+                send_quotation_status_change_email.delay(
+                    quote.pk,
+                    old_status,
+                    new_status
+                )
+
             return Response(serializer.data)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
     def delete(self, request, pk):
         quote = self.get_object(pk)
@@ -309,10 +346,13 @@ class QuoteInvoiceDownloadView(APIView):
 
     def get(self, request, pk):
         from django.template.loader import render_to_string
-        from weasyprint import HTML
+        from xhtml2pdf import pisa
         from django.http import HttpResponse
         from .models import Quote
-        quote = Quote.objects.get(pk=pk)
+        from io import BytesIO
+        from django.shortcuts import get_object_or_404
+
+        quote = get_object_or_404(Quote, pk=pk)
         import os
         from django.conf import settings
         logo_path = os.path.join(settings.BASE_DIR, 'static', 'img', 'sria_logo.png')
@@ -337,7 +377,9 @@ class QuoteInvoiceDownloadView(APIView):
             'logo_path': logo_path,
         }
         html_string = render_to_string('quote_invoice.html', context)
-        pdf_file = HTML(string=html_string).write_pdf()
+        pdf_buffer = BytesIO()
+        pisa.CreatePDF(html_string, pdf_buffer)
+        pdf_file = pdf_buffer.getvalue()
         response = HttpResponse(pdf_file, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="invoice_{quote.quote_no}.pdf"'
         return response 

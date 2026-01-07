@@ -137,6 +137,7 @@ class QuoteItem(models.Model):
     # Optional tracking numbers
     po_number = models.CharField(max_length=50, blank=True, null=True)
     bill_number = models.CharField(max_length=50, blank=True, null=True)
+    
 
     def save(self, *args, **kwargs):
         self.full_clean()  # 🔒 enforce validation
