@@ -270,50 +270,106 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
 # INVOICE GENERATION SERIALIZER
 # ==============================================================================
 
+# class GenerateInvoiceSerializer(serializers.Serializer):
+#     """Serializer for generating invoice from quote"""
+#     quote_id = serializers.IntegerField()
+#     due_days = serializers.IntegerField(default=30, min_value=1, max_value=365)
+#     # include_milestones = serializers.BooleanField(default=False)
+#     # milestones = serializers.ListField(
+#     #     child=MilestoneCreateSerializer(),
+#     #     required=False,
+#     #     allow_empty=True
+#     # )
+#     product_service_id = serializers.IntegerField(
+#         required=False,
+#         allow_null=True
+#     )
+#     product_service_ids = serializers.ListField(
+#         child=serializers.IntegerField(),
+#         required=False,
+#         allow_empty=True
+#     )
+#     product_group_id = serializers.IntegerField(
+#         required=False,
+#         allow_null=True
+#     )
+#     notes = serializers.CharField(required=False, allow_blank=True)
+#     terms_conditions = serializers.CharField(required=False, allow_blank=True)
+    
+#     def validate_milestones(self, value):
+#         """Validate milestones sum to 100%"""
+#         if not value:
+#             return value
+        
+#         total_percentage = sum(Decimal(str(m['percentage'])) for m in value)
+        
+#         if total_percentage != 100:
+#             raise serializers.ValidationError(
+#                 f"Total milestone percentages must equal 100%, got {total_percentage}%"
+#             )
+        
+#         return value
+    
+    
+
+#     def validate(self, data):
+#         # Ensure only one of product_service_id, product_service_ids, product_group_id is provided
+#         ps_single = 'product_service_id' in data and data.get('product_service_id') is not None
+#         ps_list = 'product_service_ids' in data and data.get('product_service_ids')
+#         pg = 'product_group_id' in data and data.get('product_group_id') is not None
+
+#         provided = sum(bool(x) for x in [ps_single, bool(ps_list), pg])
+#         if provided > 1:
+#             raise serializers.ValidationError(
+#                 "Provide only one of product_service_id, product_service_ids, or product_group_id"
+#             )
+
+#         return data
 class GenerateInvoiceSerializer(serializers.Serializer):
-    """Serializer for generating invoice from quote"""
     quote_id = serializers.IntegerField()
     due_days = serializers.IntegerField(default=30, min_value=1, max_value=365)
-    # include_milestones = serializers.BooleanField(default=False)
-    # milestones = serializers.ListField(
-    #     child=MilestoneCreateSerializer(),
-    #     required=False,
-    #     allow_empty=True
-    # )
-    product_service_id = serializers.IntegerField(
+
+    product_service_id = serializers.IntegerField(required=False, allow_null=True)
+    product_service_ids = serializers.ListField(
+        child=serializers.IntegerField(),
         required=False,
-        allow_null=True
+        allow_empty=True
     )
+
+    # 🔥 SUPPORT BOTH
+    product_group_id = serializers.IntegerField(required=False, allow_null=True)
+    product_group_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True
+    )
+
+    # NEW: Select specific quote items by their IDs
+    quote_item_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True
+    )
+
     notes = serializers.CharField(required=False, allow_blank=True)
     terms_conditions = serializers.CharField(required=False, allow_blank=True)
-    
-    def validate_milestones(self, value):
-        """Validate milestones sum to 100%"""
-        if not value:
-            return value
-        
-        total_percentage = sum(Decimal(str(m['percentage'])) for m in value)
-        
-        if total_percentage != 100:
-            raise serializers.ValidationError(
-                f"Total milestone percentages must equal 100%, got {total_percentage}%"
-            )
-        
-        return value
-    
+
     def validate(self, data):
-        """Cross-field validation"""
-        if data.get('include_milestones') and not data.get('milestones'):
-            raise serializers.ValidationError({
-                'milestones': 'Milestones are required when include_milestones is True'
-            })
-        
-        if not data.get('include_milestones') and data.get('milestones'):
-            raise serializers.ValidationError({
-                'include_milestones': 'Set include_milestones to True to add milestones'
-            })
-        
+        provided = sum(bool(x) for x in [
+            data.get('product_service_id'),
+            data.get('product_service_ids'),
+            data.get('product_group_id'),
+            data.get('product_group_ids'),
+            data.get('quote_item_ids'),
+        ])
+
+        if provided > 1:
+            raise serializers.ValidationError(
+                "Provide only ONE filter (service OR group OR quote_items)"
+            )
+
         return data
+
 
 
 # ==============================================================================
@@ -426,3 +482,41 @@ class UpdateInvoiceSerializer(serializers.ModelSerializer):
         if value < 0 or value > 100:
             raise serializers.ValidationError("Tax percentage must be between 0 and 100")
         return value
+
+
+
+
+
+from rest_framework import serializers
+from .models import *
+
+class PurchaseOrderItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PurchaseOrderItem
+        fields = '__all__'
+
+
+class PurchaseOrderSerializer(serializers.ModelSerializer):
+    items = PurchaseOrderItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = PurchaseOrder
+        fields = '__all__'
+
+
+class VendorBillSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VendorBill
+        read_only_fields = (
+            'total_amount',
+            'paid_amount',
+            'balance_amount',
+            'status',
+        )
+        fields = '__all__'
+
+
+class OutgoingPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OutgoingPayment
+        fields = '__all__'

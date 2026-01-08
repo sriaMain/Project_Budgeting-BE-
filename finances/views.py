@@ -14,12 +14,12 @@ from io import BytesIO
 from datetime import timedelta, datetime
 from decimal import Decimal
 
-from .models import Invoice, InvoiceItem, InvoicePayment
+from .models import Invoice, InvoiceItem, InvoicePayment, PurchaseOrder, Vendor, VendorBill
 from .serializers import (
     InvoiceListSerializer, InvoiceDetailSerializer, InvoiceItemSerializer,
     InvoicePaymentSerializer,
     GenerateInvoiceSerializer, RecordPaymentSerializer,
-    SendInvoiceEmailSerializer, CancelInvoiceSerializer, InvoiceStatsSerializer
+    SendInvoiceEmailSerializer, CancelInvoiceSerializer, InvoiceStatsSerializer, PurchaseOrderSerializer,VendorBillSerializer,OutgoingPaymentSerializer   
 )
 from .services import InvoiceService
 from django.core.exceptions import ValidationError
@@ -30,6 +30,8 @@ from .tasks import send_invoice_email
 from .utils import validate_invoice_token
 from django.template.loader import render_to_string
 from xhtml2pdf import pisa
+from Project.models import Project
+
 class QuotationDetailView(APIView):
     """
     Get quotation details with invoice generation capability
@@ -199,6 +201,54 @@ class InvoiceDetailView(APIView):
         )
         
 
+# class GenerateInvoiceView(APIView):
+#     permission_classes = [IsAuthenticated]
+#     authentication_classes = [JWTAuthentication]
+
+#     @transaction.atomic
+#     def post(self, request):
+#         serializer = GenerateInvoiceSerializer(data=request.data)
+
+#         if not serializer.is_valid():
+#             return Response(
+#                 serializer.errors,
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+
+#         quote = get_object_or_404(
+#             Quote,
+#             pk=serializer.validated_data["quote_id"]
+#         )
+
+#         try:
+#             invoice = InvoiceService.create_invoice_from_quote(
+#                 quote=quote,
+#                 user=request.user,
+#                 due_days=serializer.validated_data["due_days"],
+#                 product_service_id=serializer.validated_data.get("product_service_id"),
+#                 product_service_ids=serializer.validated_data.get("product_service_ids"),
+#                 product_group_id=serializer.validated_data.get("product_group_id"),
+#                 notes=serializer.validated_data.get("notes", ""),
+#                 terms_conditions=serializer.validated_data.get(
+#                     "terms_conditions", ""
+#                 ),
+#             )
+
+#         except ValidationError as e:
+#             return Response(
+#                 {"error": str(e)},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+
+#         response_serializer = InvoiceDetailSerializer(invoice)
+
+#         return Response(
+#             {
+#                 "message": f"Invoice {invoice.invoice_no} generated successfully",
+#                 "invoice": response_serializer.data,
+#             },
+#             status=status.HTTP_201_CREATED
+#         )
 class GenerateInvoiceView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
@@ -206,45 +256,52 @@ class GenerateInvoiceView(APIView):
     @transaction.atomic
     def post(self, request):
         serializer = GenerateInvoiceSerializer(data=request.data)
-
-        if not serializer.is_valid():
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        serializer.is_valid(raise_exception=True)
 
         quote = get_object_or_404(
             Quote,
             pk=serializer.validated_data["quote_id"]
         )
 
+        # 🔥 Normalize product_group_id → product_group_ids (list)
+        product_group_ids = serializer.validated_data.get("product_group_ids") or []
+        
+        if serializer.validated_data.get("product_group_id"):
+            product_group_ids = [serializer.validated_data["product_group_id"]]
+
+        # Get other filters
+        product_service_id = serializer.validated_data.get("product_service_id")
+        product_service_ids = serializer.validated_data.get("product_service_ids") or []
+        quote_item_ids = serializer.validated_data.get("quote_item_ids") or []
+
         try:
             invoice = InvoiceService.create_invoice_from_quote(
                 quote=quote,
                 user=request.user,
                 due_days=serializer.validated_data["due_days"],
-                product_service_id=serializer.validated_data.get("product_service_id"),
+                product_service_id=product_service_id,
+                product_service_ids=product_service_ids,
+                product_group_ids=product_group_ids,
+                quote_item_ids=quote_item_ids,
                 notes=serializer.validated_data.get("notes", ""),
-                terms_conditions=serializer.validated_data.get(
-                    "terms_conditions", ""
-                ),
+                terms_conditions=serializer.validated_data.get("terms_conditions", ""),
             )
 
         except ValidationError as e:
             return Response(
-                {"error": str(e)},
+                {"error": e.messages[0] if hasattr(e, "messages") else str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        response_serializer = InvoiceDetailSerializer(invoice)
 
         return Response(
             {
                 "message": f"Invoice {invoice.invoice_no} generated successfully",
-                "invoice": response_serializer.data,
+                "invoice": InvoiceDetailSerializer(invoice).data,
             },
             status=status.HTTP_201_CREATED
         )
+
+
 
 class RecordPaymentView(APIView):
     permission_classes = [IsAuthenticated]
@@ -746,3 +803,254 @@ class ShareInvoiceLinkView(APIView):
         return Response({
             "public_invoice_link": public_link
         })
+
+
+# ============================================================================
+# PURCHASE ORDER VIEWS
+# ============================================================================
+
+class PurchaseOrderListView(APIView):
+    """
+    List all purchase orders with filters
+    
+    GET /api/purchase-orders/
+    Query Params:
+        - status: filter by status (draft, issued, completed, cancelled)
+        - vendor_id: filter by vendor
+        - page: page number
+        - page_size: items per page
+    """
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    
+    def get(self, request):
+        from .models import PurchaseOrder
+        
+        queryset = PurchaseOrder.objects.select_related(
+            'vendor', 'quote', 'project', 'created_by'
+        ).prefetch_related('items')
+        
+        # Apply filters
+        status_filter = request.query_params.get('status')
+        vendor_id = request.query_params.get('vendor_id')
+        
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        
+        if vendor_id:
+            queryset = queryset.filter(vendor_id=vendor_id)
+        
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 20))
+        
+        start = (page - 1) * page_size
+        end = start + page_size
+        
+        total_count = queryset.count()
+        purchase_orders = queryset.order_by('-issue_date')[start:end]
+        
+        from .serializers import PurchaseOrderSerializer
+        serializer = PurchaseOrderSerializer(purchase_orders, many=True)
+        
+        return Response({
+            'count': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total_count + page_size - 1) // page_size,
+            'results': serializer.data
+        }, status=status.HTTP_200_OK)
+
+
+class PurchaseOrderDetailView(APIView):
+    """
+    Get, update, or delete a purchase order
+    
+    GET /api/purchase-orders/<po_id>/
+    PUT /api/purchase-orders/<po_id>/
+    DELETE /api/purchase-orders/<po_id>/
+    """
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    
+    def get(self, request, po_id):
+        from .models import PurchaseOrder
+        from .serializers import PurchaseOrderSerializer
+        
+        po = get_object_or_404(PurchaseOrder, id=po_id)
+        serializer = PurchaseOrderSerializer(po)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    def put(self, request, po_id):
+        from .models import PurchaseOrder
+        from .serializers import PurchaseOrderSerializer
+        
+        po = get_object_or_404(PurchaseOrder, id=po_id)
+        
+        if po.status != 'draft':
+            return Response(
+                {"error": "Only draft POs can be edited"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        serializer = PurchaseOrderSerializer(po, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, po_id):
+        from .models import PurchaseOrder
+        
+        po = get_object_or_404(PurchaseOrder, id=po_id)
+        
+        if po.status != 'draft':
+            return Response(
+                {"error": "Only draft POs can be deleted"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        po.delete()
+        return Response(
+            {"message": "Purchase order deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT
+        )
+
+
+class CreatePurchaseOrderView(APIView):
+    """
+    Create a new purchase order from a quote
+    
+    POST /api/purchase-orders/create/
+    {
+        "quote_id": 47,
+        "vendor_id": 2,
+        "project_id": 22,
+        "quote_item_ids": [67, 68]
+    }
+    """
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    
+    @transaction.atomic
+    def post(self, request):
+        from .models import PurchaseOrder, PurchaseOrderItem
+        from product_group.models import Quote
+        
+        quote_id = request.data.get('quote_id')
+        vendor_id = request.data.get('vendor_id')
+        project_id = request.data.get('project_id')
+        quote_item_ids = request.data.get('quote_item_ids', [])
+        
+        if not all([quote_id, vendor_id, project_id]):
+            return Response(
+                {"error": "quote_id, vendor_id, and project_id are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            quote = Quote.objects.get(quote_no=quote_id)
+            vendor = Vendor.objects.get(id=vendor_id)
+            project = Project.objects.get(id=project_id)
+        except (Quote.DoesNotExist, Vendor.DoesNotExist, Project.DoesNotExist) as e:
+            return Response(
+                {"error": f"Invalid reference: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get quote items
+        quote_items = quote.items.all()
+        if quote_item_ids:
+            quote_items = quote_items.filter(id__in=quote_item_ids)
+        
+        if not quote_items.exists():
+            return Response(
+                {"error": "No quote items found for PO"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Generate PO number
+        from datetime import datetime
+        po_no = f"PO-{datetime.now().strftime('%Y%m')}-{PurchaseOrder.objects.count() + 1:04d}"
+        
+        # Create PO
+        po = PurchaseOrder.objects.create(
+            po_no=po_no,
+            vendor=vendor,
+            quote=quote,
+            project=project,
+            status='draft',
+            created_by=request.user
+        )
+        
+        # Create PO items
+        for item in quote_items:
+            PurchaseOrderItem.objects.create(
+                purchase_order=po,
+                quote_item=item,
+                description=item.description,
+                quantity=item.quantity,
+                unit_rate=item.price_per_unit
+            )
+        
+        from .serializers import PurchaseOrderSerializer
+        serializer = PurchaseOrderSerializer(po)
+        
+        return Response(
+            {
+                "message": f"Purchase order {po.po_no} created successfully",
+                "purchase_order": serializer.data
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+
+class VendorBillListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        bills = VendorBill.objects.select_related('vendor', 'purchase_order')
+        serializer = VendorBillSerializer(bills, many=True)
+        return Response(serializer.data)
+class CreateVendorBillView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        po = get_object_or_404(PurchaseOrder, id=request.data['purchase_order_id'])
+
+        bill = VendorBill.objects.create(
+            bill_no=request.data['bill_no'],
+            vendor=po.vendor,
+            purchase_order=po,
+            bill_date=request.data['bill_date'],
+            due_date=request.data['due_date'],
+        )
+
+        serializer = VendorBillSerializer(bill)
+        return Response(
+            {
+                "message": "Vendor bill created",
+                "bill": serializer.data
+            },
+            status=201
+        )
+
+
+class RecordOutgoingPaymentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, bill_id):
+        bill = get_object_or_404(VendorBill, id=bill_id)
+
+        serializer = OutgoingPaymentSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(
+                vendor_bill=bill,
+                vendor=bill.vendor
+            )
+            return Response(
+                {"message": "Payment recorded successfully"},
+                status=201
+            )
+        return Response(serializer.errors, status=400)

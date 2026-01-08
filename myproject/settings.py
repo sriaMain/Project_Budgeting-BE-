@@ -57,16 +57,28 @@ CORS_ALLOW_HEADERS = [
 # >>>>>>> 8d8baa6 (roles code)
 
 
+# CORS_ALLOWED_ORIGINS = [
+#     # "http://localhost:55430",  # ✅ Correct (no trailing slash)
+
+#     "http://localhost:5173",
+#     # "https://gate-check-lwnp.onrender.com" 
+#     "http://localhost:8000",
+# #    "http://localhost:5173",
+#     # "https://project-budgeting-fe.onrender.com/",
+
+#    ]
 CORS_ALLOWED_ORIGINS = [
-    # "http://localhost:55430",  # ✅ Correct (no trailing slash)
-
     "http://localhost:5173",
-    # "https://gate-check-lwnp.onrender.com" 
     "http://localhost:8000",
-#    "http://localhost:5173",
-    # "https://project-budgeting-fe.onrender.com/",
+]
 
-   ]
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:8000",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
 
 CORS_ALLOW_ALL_ORIGINS = True  # Only allow specified origins
 
