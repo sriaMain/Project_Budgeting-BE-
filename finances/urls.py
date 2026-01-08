@@ -6,7 +6,8 @@ from django.http import HttpResponse
 from .views import (QuotationDetailView, InvoiceListView, InvoiceDetailView,
                     GenerateInvoiceView, RecordPaymentView, InvoicePaymentListView,  
                     DownloadInvoicePDFView, SendInvoiceEmailView, CancelInvoiceView,
-                    InvoiceShareableLinkView, PublicInvoiceView, InvoiceStatisticsView, DownloadInvoicePDFView,PublicInvoicePDFView,ShareInvoiceLinkView)
+                    InvoiceShareableLinkView, PublicInvoiceView, InvoiceStatisticsView, DownloadInvoicePDFView,PublicInvoicePDFView,ShareInvoiceLinkView,
+                    PurchaseOrderListView, PurchaseOrderDetailView, CreatePurchaseOrderView, VendorBillListView, CreateVendorBillView, RecordOutgoingPaymentView)
 
 urlpatterns = [
     path("test/", lambda r: HttpResponse("FINANCES OK")),
@@ -76,6 +77,13 @@ urlpatterns = [
         "invoices/<int:invoice_id>/share-link/",
         ShareInvoiceLinkView.as_view()
     ),
+    
+    # Purchase Orders
+    path('purchase-orders/', PurchaseOrderListView.as_view(), name='po-list'),
+    path('purchase-orders/<int:po_id>/', PurchaseOrderDetailView.as_view(), name='po-detail'),
+    path('purchase-orders/create/', CreatePurchaseOrderView.as_view(), name='po-create'),
+    path('vendor-bills/', VendorBillListView.as_view()),
+    path('vendor-bills/create/', CreateVendorBillView.as_view()),
 ]
 
 

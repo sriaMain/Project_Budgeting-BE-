@@ -24,8 +24,12 @@ from django.db import IntegrityError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from django.db.models import Q, Prefetch
 from django.core.cache import cache
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+from .models import Vendor
 # import logging
-from .serializers import UserCreateSerializer, UserListSerializer, UserDetailSerializer 
+from .serializers import UserCreateSerializer, UserListSerializer, UserDetailSerializer,VendorSerializer
 import logging
 logger = logging.getLogger(__name__)
 
@@ -395,3 +399,21 @@ class UserDetailVieW(APIView):
         except Exception as e:
             logger.error(f"UserDetailView PUT Error: {str(e)}", exc_info=True)
             return Response({"error": "Internal server error", "details": str(e)}, status=500)
+        
+
+# vendor/views.py
+class VendorListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request):
+        vendors = Vendor.objects.filter(is_active=True)
+        serializer = VendorSerializer(vendors, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = VendorSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)

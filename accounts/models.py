@@ -99,3 +99,33 @@ class PasswordResetOTP(models.Model):
         obj.set_code(raw)
         obj.save()
         return obj, raw
+
+
+
+
+
+from django.db import models
+
+class Vendor(models.Model):
+    VENDOR_TYPE_CHOICES = [
+        ('freelancer', 'Freelancer'),
+        ('company', 'Company'),
+    ]
+
+    name = models.CharField(max_length=255, unique=True)
+    vendor_type = models.CharField(max_length=20, choices=VENDOR_TYPE_CHOICES)
+
+    product_groups = models.ManyToManyField(
+        'product_group.ProductGroup',
+        related_name='vendors',
+        blank=True
+    )
+
+    email = models.EmailField(blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name

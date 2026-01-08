@@ -277,6 +277,18 @@ from django.db.models import Sum
 from Project.models import Project
 from product_group.models import Quote, Product_Services
 from django.core.exceptions import ValidationError
+from datetime import timedelta
+from django.conf import settings
+from django.utils.crypto import get_random_string
+from django.urls import reverse
+from django.db import models, transaction
+from django.core.exceptions import ValidationError
+from django.db.models import F
+from django.utils import timezone
+from decimal import Decimal
+from accounts.models import Vendor
+
+
 
 
 class Invoice(models.Model):
@@ -536,35 +548,128 @@ class InvoicePayment(models.Model):
 
 
 
+# from decimal import Decimal
+# from django.utils import timezone
 
-from django.db import models
+# class PurchaseOrder(models.Model):
+#     STATUS_CHOICES = [
+#         ('draft', 'Draft'),
+#         ('issued', 'Issued'),
+#         ('completed', 'Completed'),
+#         ('cancelled', 'Cancelled'),
+#     ]
 
-class Vendor(models.Model):
-    VENDOR_TYPE_CHOICES = [
-        ('freelancer', 'Freelancer'),
-        ('company', 'Company'),
-    ]
+#     po_no = models.CharField(max_length=30, unique=True)
+#     vendor = models.ForeignKey(Vendor, on_delete=models.PROTECT)
+#     quote = models.ForeignKey('product_group.Quote', on_delete=models.PROTECT)
+#     project = models.ForeignKey('Project.Project', on_delete=models.PROTECT)
 
-    name = models.CharField(max_length=255, unique=True)
-    vendor_type = models.CharField(max_length=20, choices=VENDOR_TYPE_CHOICES)
+#     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
 
-    product_groups = models.ManyToManyField(
-        'product_group.ProductGroup',
-        related_name='vendors',
-        blank=True
-    )
+#     issue_date = models.DateField(default=timezone.now)
 
-    email = models.EmailField(blank=True)
-    phone = models.CharField(max_length=20, blank=True)
+#     sub_total = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+#     total_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
 
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+#     created_by = models.ForeignKey(
+#         'accounts.Account',
+#         on_delete=models.SET_NULL,
+#         null=True
+#     )
 
-    def __str__(self):
-        return self.name
+#     def calculate_totals(self):
+#         self.sub_total = sum(item.amount for item in self.items.all())
+#         self.total_amount = self.sub_total
 
-from decimal import Decimal
-from django.utils import timezone
+#     def save(self, *args, **kwargs):
+#         self.calculate_totals()
+#         super().save(*args, **kwargs)
+
+# class PurchaseOrderItem(models.Model):
+#     purchase_order = models.ForeignKey(
+#         PurchaseOrder,
+#         related_name='items',
+#         on_delete=models.CASCADE
+#     )
+
+#     quote_item = models.ForeignKey(
+#         'product_group.QuoteItem',
+#         on_delete=models.PROTECT
+#     )
+
+#     description = models.TextField()
+#     quantity = models.DecimalField(max_digits=10, decimal_places=2)
+#     unit_rate = models.DecimalField(max_digits=10, decimal_places=2)
+
+#     amount = models.DecimalField(max_digits=15, decimal_places=2)
+
+#     def save(self, *args, **kwargs):
+#         self.amount = self.quantity * self.unit_rate
+#         super().save(*args, **kwargs)
+
+
+# class VendorBill(models.Model):
+#     STATUS_CHOICES = [
+#         ('unpaid', 'Unpaid'),
+#         ('partially_paid', 'Partially Paid'),
+#         ('paid', 'Paid'),
+#     ]
+
+#     bill_no = models.CharField(max_length=50, unique=True)
+#     vendor = models.ForeignKey(Vendor, on_delete=models.PROTECT)
+#     purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.PROTECT)
+
+#     bill_date = models.DateField()
+#     due_date = models.DateField()
+
+#     total_amount = models.DecimalField(max_digits=15, decimal_places=2)
+#     paid_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+#     balance_amount = models.DecimalField(max_digits=15, decimal_places=2)
+
+#     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='unpaid')
+
+#     def update_status(self):
+#         self.balance_amount = self.total_amount - self.paid_amount
+#         if self.balance_amount <= 0:
+#             self.status = 'paid'
+#         elif self.paid_amount > 0:
+#             self.status = 'partially_paid'
+#         else:
+#             self.status = 'unpaid'
+# class OutgoingPayment(models.Model):
+#     PAYMENT_METHOD_CHOICES = [
+#         ('bank', 'Bank Transfer'),
+#         ('upi', 'UPI'),
+#         ('cash', 'Cash'),
+#     ]
+
+#     vendor_bill = models.ForeignKey(
+#         VendorBill,
+#         related_name='payments',
+#         on_delete=models.PROTECT
+#     )
+
+#     vendor = models.ForeignKey(Vendor, on_delete=models.PROTECT)
+
+#     payment_date = models.DateField()
+#     amount = models.DecimalField(max_digits=15, decimal_places=2)
+
+#     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
+#     reference_no = models.CharField(max_length=100, blank=True)
+
+#     created_at = models.DateTimeField(auto_now_add=True)
+
+#     def save(self, *args, **kwargs):
+#         if self.amount > self.vendor_bill.balance_amount:
+#             raise ValidationError("Payment exceeds bill balance")
+
+#         super().save(*args, **kwargs)
+
+#         self.vendor_bill.paid_amount += self.amount
+#         self.vendor_bill.update_status()
+#         self.vendor_bill.save()
+
+
 
 class PurchaseOrder(models.Model):
     STATUS_CHOICES = [
@@ -580,7 +685,6 @@ class PurchaseOrder(models.Model):
     project = models.ForeignKey('Project.Project', on_delete=models.PROTECT)
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
-
     issue_date = models.DateField(default=timezone.now)
 
     sub_total = models.DecimalField(max_digits=15, decimal_places=2, default=0)
@@ -593,13 +697,14 @@ class PurchaseOrder(models.Model):
     )
 
     def calculate_totals(self):
-        self.sub_total = sum(item.amount for item in self.items.all())
+        self.sub_total = self.items.aggregate(
+            total=models.Sum('amount')
+        )['total'] or Decimal('0.00')
         self.total_amount = self.sub_total
 
     def save(self, *args, **kwargs):
-        self.calculate_totals()
         super().save(*args, **kwargs)
-
+        
 class PurchaseOrderItem(models.Model):
     purchase_order = models.ForeignKey(
         PurchaseOrder,
@@ -643,6 +748,12 @@ class VendorBill(models.Model):
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='unpaid')
 
+    def save(self, *args, **kwargs):
+        if not self.pk:
+            self.total_amount = self.purchase_order.total_amount
+            self.balance_amount = self.total_amount
+        super().save(*args, **kwargs)
+
     def update_status(self):
         self.balance_amount = self.total_amount - self.paid_amount
         if self.balance_amount <= 0:
@@ -674,12 +785,19 @@ class OutgoingPayment(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
         if self.amount > self.vendor_bill.balance_amount:
             raise ValidationError("Payment exceeds bill balance")
 
         super().save(*args, **kwargs)
 
-        self.vendor_bill.paid_amount += self.amount
-        self.vendor_bill.update_status()
-        self.vendor_bill.save()
+        VendorBill.objects.filter(
+            id=self.vendor_bill_id
+        ).update(
+            paid_amount=F('paid_amount') + self.amount
+        )
+
+        bill = VendorBill.objects.get(id=self.vendor_bill_id)
+        bill.update_status()
+        bill.save()
