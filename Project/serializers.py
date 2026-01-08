@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog, TaskExtraHoursRequest
+from .models import (Project, ProjectBudget, Task, Timesheet, TimesheetEntry, TaskTimerLog,
+                      TaskExtraHoursRequest)
 from django.core.exceptions import ObjectDoesNotExist
 from accounts.models import Account
 from finances.serializers import InvoiceListSerializer
@@ -138,18 +139,70 @@ class ProjectListSerializer(serializers.ModelSerializer):
             return ProjectBudgetSerializer(obj.budget).data
         except ObjectDoesNotExist:
             return None
-    def get_invoices(self, obj):
-        invoices = obj.invoice_set.all()  # ✅ CORRECT
+    
+# class TaskSerializer(serializers.ModelSerializer):
 
-        if not invoices.exists():
-            return []
+#     created_by = serializers.SerializerMethodField()
+#     modified_by = serializers.SerializerMethodField()
+#     project = serializers.PrimaryKeyRelatedField(queryset=Project.objects.all(), required=True)
+#     consumed_hours = serializers.SerializerMethodField()
+#     remaining_hours = serializers.SerializerMethodField()
 
-        return InvoiceListSerializer(invoices, many=True).data
 
-   
- 
+
+#     # Optionally, if you want to keep the project_name in the output, add a read-only field:
+#     project_name = serializers.SerializerMethodField(read_only=True)
+
+#     def get_project_name(self, obj):
+#         return obj.project.project_name if obj.project else None
+
+#     def get_created_by(self, obj):
+#         return obj.created_by.username if obj.created_by else None
+
+#     def get_modified_by(self, obj):
+#         return obj.modified_by.username if obj.modified_by else None
+    
+#     def get_consumed_hours(self, obj):
+#         return obj.consumed_hours
+
+#     def get_remaining_hours(self, obj):
+#         return obj.remaining_hours
+#     assigned_to = serializers.PrimaryKeyRelatedField(
+#         queryset=Account.objects.all(),
+#         required=False,
+#         allow_null=True
+#     )
+
+#     def to_representation(self, instance):
+#         rep = super().to_representation(instance)
+#         # Replace assigned_to with user object if present
+#         if instance.assigned_to:
+#             rep["assigned_to"] = {
+#                 "id": instance.assigned_to.id,
+#                 "username": instance.assigned_to.username
+#             }
+#         else:
+#             rep["assigned_to"] = None
+#         return rep
+
+#     class Meta:
+#         model = Task
+#         fields = [
+#             "id",
+#             "title",
+#             "allocated_hours",
+#             "consumed_hours",
+#             "remaining_hours",
+#             "allocated_hours",
+#             "assigned_to",
+#             "project",
+#             "created_by",
+#             "modified_by",
+#             "status",
+#             "project_name",
+#         ]
 class TaskSerializer(serializers.ModelSerializer):
-    # due_date = serializers.DateField()
+    # due_date = serializers.DateField(required=True)
     created_by = serializers.SerializerMethodField(read_only=True)
     modified_by = serializers.SerializerMethodField(read_only=True)
     assigned_to = serializers.PrimaryKeyRelatedField(
@@ -164,11 +217,81 @@ class TaskSerializer(serializers.ModelSerializer):
     project_name = serializers.SerializerMethodField(read_only=True)
     consumed_hours = serializers.SerializerMethodField(read_only=True)
     remaining_hours = serializers.SerializerMethodField(read_only=True)
+    allocated_formatted = serializers.SerializerMethodField(read_only=True)
+    consumed_formatted = serializers.SerializerMethodField(read_only=True)
+    remaining_formatted_hms = serializers.SerializerMethodField(read_only=True)
     needs_extra_hours = serializers.SerializerMethodField(read_only=True)
     total_seconds = serializers.SerializerMethodField(read_only=True)
     running = serializers.SerializerMethodField(read_only=True)
     started_at = serializers.SerializerMethodField(read_only=True)
- 
+    is_stopped = serializers.SerializerMethodField(read_only=True)
+    stop_reason = serializers.SerializerMethodField(read_only=True)
+    stopped_at = serializers.SerializerMethodField(read_only=True)
+    remaining_seconds = serializers.SerializerMethodField(read_only=True)
+    remaining_formatted = serializers.SerializerMethodField(read_only=True)
+    exceeded_by_seconds = serializers.SerializerMethodField(read_only=True)
+    exceeded_formatted = serializers.SerializerMethodField(read_only=True)
+    has_extra_hours_request = serializers.SerializerMethodField(read_only=True)
+    # has_pending_extra_hours_request = serializers.SerializerMethodField(read_only=True)
+    # has_approved_extra_hours_request = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Task
+        fields = [
+            "id",
+            "title",
+            "status",
+            "allocated_hours",
+            "allocated_formatted",
+            "consumed_hours",
+            "remaining_hours",
+            "consumed_formatted",
+            "remaining_formatted_hms",
+            "assigned_to",
+            "project",
+            "project_name",
+            "created_by",
+            "modified_by",
+            "due_date",
+            "needs_extra_hours",
+            "total_seconds",
+            "running",
+            "started_at",
+            "is_stopped",
+            "stop_reason",
+            "stopped_at",
+            "remaining_seconds",
+            "remaining_formatted",
+            "exceeded_by_seconds",
+            "exceeded_formatted",
+            "has_extra_hours_request",
+           
+            # "is_extra_hours_requested"
+        ]
+        read_only_fields = [
+            "created_by",
+            "modified_by",
+            "consumed_hours",
+            "remaining_hours",
+            "allocated_formatted",
+            "has_extra_hours_request",
+            "needs_extra_hours",
+            "total_seconds",
+            "running",
+            "started_at",
+            "is_stopped",
+            "stop_reason",
+            "stopped_at",
+            "remaining_seconds",
+            "remaining_formatted",
+            "exceeded_by_seconds",
+            "exceeded_formatted",
+        ]
+
+    # Computed fields
+    consumed_hours = serializers.SerializerMethodField(read_only=True)
+    remaining_hours = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Task
         fields = [
@@ -183,23 +306,18 @@ class TaskSerializer(serializers.ModelSerializer):
             "project_name",
             "created_by",
             "modified_by",
-            "due_date",
-            "needs_extra_hours",
-            "total_seconds",
-            "running",
-            "started_at",
         ]
         read_only_fields = [
             "created_by",
             "modified_by",
             "consumed_hours",
             "remaining_hours",
-            "needs_extra_hours",
-            "total_seconds",
-            "running",
-            "started_at",
         ]
- 
+
+    # ==========================
+    # Serializer Method Fields
+    # ==========================
+
     def get_project_name(self, obj):
         return obj.project.project_name if obj.project else None
  
@@ -215,53 +333,7 @@ class TaskSerializer(serializers.ModelSerializer):
  
     def get_remaining_hours(self, obj):
         return obj.remaining_hours
- 
-    def get_needs_extra_hours(self, obj):
-        try:
-            allocated = float(obj.allocated_hours)
-            consumed = float(obj.consumed_hours)
-            return consumed > allocated
-        except Exception:
-            return False
- 
-    def get_total_seconds(self, obj):
-        request = self.context.get('request')
-        if not request or not hasattr(request, 'user'):
-            return None
-        from Project.redis_utils import get_active_timer
-        from Project.models import TaskTimerLog
-        user = request.user
-        # Sum all previous logs for this user and task
-        previous_logs = TaskTimerLog.objects.filter(task=obj, user=user, is_active=False)
-        prev_seconds = sum([(log.end_time - log.start_time).total_seconds() for log in previous_logs if log.end_time and log.start_time])
-        prev_seconds = int(prev_seconds)
-        # If running, add current session
-        redis_task, redis_start = get_active_timer(user.id)
-        if redis_task and int(redis_task) == obj.id and redis_start:
-            from django.utils import timezone
-            start_time = timezone.datetime.fromisoformat(redis_start.decode())
-            elapsed_seconds = int((timezone.now() - start_time).total_seconds())
-            return prev_seconds + elapsed_seconds
-        return prev_seconds
- 
-    def get_running(self, obj):
-        request = self.context.get('request')
-        if not request or not hasattr(request, 'user'):
-            return False
-        from Project.redis_utils import get_active_timer
-        redis_task, _ = get_active_timer(request.user.id)
-        return bool(redis_task and int(redis_task) == obj.id)
- 
-    def get_started_at(self, obj):
-        request = self.context.get('request')
-        if not request or not hasattr(request, 'user'):
-            return None
-        from Project.redis_utils import get_active_timer
-        redis_task, redis_start = get_active_timer(request.user.id)
-        if redis_task and int(redis_task) == obj.id and redis_start:
-            return redis_start.decode()
-        return None
- 
+
     def to_representation(self, instance):
         rep = super().to_representation(instance)
         # Replace assigned_to with user object if present
@@ -327,17 +399,57 @@ class TimesheetEntrySerializer(serializers.ModelSerializer):
  
  
 class TimesheetSerializer(serializers.ModelSerializer):
-    entries = TimesheetEntrySerializer(many=True, read_only=True)
- 
+    entries = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Timesheet
         fields = [
             'id', 'week_start', 'week_end',
             'status', 'entries'
         ]
- 
- 
- 
+
+    def get_entries(self, obj):
+        """Populate entries with a unified logic that matches weekly summary.
+
+        If `week_start` and `week_end` are provided in context, return entries
+        for the object's user within that date range (task not null). Otherwise,
+        fall back to entries attached to this timesheet.
+        """
+        from .models import TimesheetEntry
+
+        week_start = self.context.get('week_start')
+        week_end = self.context.get('week_end')
+        include_orphans = bool(self.context.get('include_orphans'))
+
+        if week_start and week_end:
+            qs = TimesheetEntry.objects.filter(
+                timesheet__user=obj.user,
+                date__gte=week_start,
+                date__lte=week_end,
+            ).select_related('task')
+        else:
+            qs = TimesheetEntry.objects.filter(
+                timesheet=obj,
+            ).select_related('task')
+        if not include_orphans:
+            qs = qs.filter(task__isnull=False)
+
+        # Local import to avoid circulars
+        from .utils import format_seconds
+
+        out = []
+        for e in qs:
+            out.append({
+                'id': e.id,
+                'task': e.task.id if e.task else None,
+                'date': e.date,
+                'hours': float(e.hours),
+                'hours_formatted': format_seconds(int(round(float(e.hours) * 3600)))['formatted'],
+            })
+        return out
+
+
+
 class TaskTimerLogSerializer(serializers.ModelSerializer):
     task_title = serializers.CharField(source="task.title", read_only=True)
  
@@ -375,5 +487,22 @@ class TaskExtraHoursRequestSerializer(serializers.ModelSerializer):
  
 class TaskExtraHoursReviewSerializer(serializers.Serializer):
     action = serializers.ChoiceField(choices=["approve", "reject"])
- 
- 
+
+
+class TimesheetWeeklySummarySerializer(serializers.Serializer):
+    """Serializer for weekly timesheet summary"""
+    week = serializers.SerializerMethodField()
+    summary = serializers.SerializerMethodField()
+    data = serializers.SerializerMethodField()
+
+    def get_week(self, obj):
+        """Extract week info from obj dict"""
+        return obj.get('week')
+
+    def get_summary(self, obj):
+        """Extract summary from obj dict"""
+        return obj.get('summary')
+
+    def get_data(self, obj):
+        """Extract data from obj dict"""
+        return obj.get('data', [])
