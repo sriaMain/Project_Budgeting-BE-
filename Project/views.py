@@ -1758,3 +1758,249 @@ class TaskGroupedByStatusAPIView(APIView):
             return Response(response_data)
 
         return Response(response_data)
+
+
+class TimesheetEmployeeAPIView(APIView):
+    """PM/Admin can fetch a specific employee's timesheet for a given week (Sunday–Saturday)."""
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request, user_id):
+        # Only PM / Admin
+        if not request.user.roles.filter(
+            role_name__in=["Project Manager", "Admin"]
+        ).exists():
+            return Response({"error": "Permission denied"}, status=403)
+
+        # Resolve employee
+        try:
+            employee = Account.objects.get(id=user_id)
+        except Account.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+
+        # Week start handling (Sunday–Saturday)
+        week_start_str = request.query_params.get("week_start")
+        if week_start_str:
+            try:
+                parsed_start = timezone.datetime.strptime(week_start_str, "%Y-%m-%d").date()
+            except ValueError:
+                return Response({"error": "Invalid week_start format. Use YYYY-MM-DD"}, status=400)
+            # Normalize provided date to the week's Monday/Sunday
+            week_start, week_end = get_week_range(parsed_start)
+        else:
+            # Default to current week (Monday–Sunday) for consistency
+            today = timezone.now().date()
+            week_start, week_end = get_week_range(today)
+
+        # Prefer an existing timesheet that overlaps this Sun–Sat week (covers legacy Mon–Sun rows)
+        timesheet = Timesheet.objects.filter(
+            user=employee,
+            week_start__lte=week_end,
+            week_end__gte=week_start,
+        ).order_by('week_start').first()
+
+        if not timesheet:
+            timesheet, _ = Timesheet.objects.get_or_create(
+                user=employee,
+                week_start=week_start,
+                defaults={"week_end": week_end}
+            )
+        elif timesheet.week_end != week_end:
+            timesheet.week_end = week_end
+            timesheet.save(update_fields=["week_end"])
+
+        tasks = Task.objects.filter(assigned_to=employee)
+
+        return Response({
+            "timesheet": TimesheetSerializer(
+                timesheet,
+                context={"week_start": week_start, "week_end": week_end}
+            ).data,
+            "tasks": [
+                {
+                    "id": task.id,
+                    "title": task.title,
+                    "allocated_hours": float(task.allocated_hours),
+                    "consumed_hours": float(task.consumed_hours),
+                    "remaining_hours": float(task.remaining_hours),
+                }
+                for task in tasks
+            ],
+        })
+
+class TimesheetWeeklySummaryAPIView(APIView):
+    """Get timesheet summary for a specific week (PM/Admin only)"""
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request):
+        # Only PM / Admin
+        if not request.user.roles.filter(
+            role_name__in=["Project Manager", "Admin"]
+        ).exists():
+            return Response({"error": "Permission denied"}, status=403)
+
+        # Get week_start from query param (YYYY-MM-DD format)
+        week_start_str = request.query_params.get('week_start')
+        
+        # Default to current week's Sunday if not provided (Sunday-Saturday week)
+        if not week_start_str:
+            today = timezone.now().date()
+            # Python weekday(): Monday=0 ... Sunday=6. For Sunday-start, shift by weekday+1 mod 7
+            days_from_sunday = (today.weekday() + 1) % 7
+            week_start = today - timedelta(days=days_from_sunday)
+        else:
+            try:
+                week_start = datetime.strptime(week_start_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response(
+                     {"error": "Invalid week_start format. Use YYYY-MM-DD"},
+                    status=400
+                )
+
+        # Calculate week range (Sunday–Saturday)
+        week_end = week_start + timedelta(days=6)
+
+        # Option: include all employees even if they logged 0 hours
+        include_all = request.query_params.get('include_all') in {"1", "true", "True", "yes"}
+
+        # Get all timesheet entries within the week range (more flexible)
+        # Only count valid entries tied to a task to avoid orphaned data
+        entries_in_week = TimesheetEntry.objects.filter(
+            date__gte=week_start,
+            date__lte=week_end,
+            task__isnull=False
+        ).select_related('timesheet', 'timesheet__user', 'task')
+
+        # Group by user (track seconds for HH:MM:SS formatting)
+        from collections import defaultdict
+        user_hours = defaultdict(lambda: {'total_seconds': 0, 'last_updated': None, 'status': None})
+        
+        for entry in entries_in_week:
+            user = entry.timesheet.user
+            user_hours[user.id]['user'] = user
+            user_hours[user.id]['total_seconds'] += int(round(float(entry.hours) * 3600))
+            user_hours[user.id]['status'] = entry.timesheet.status
+                    # If requested, include all employees with zero time
+            if include_all:
+                        all_employees = Account.objects.filter(roles__role_name__in=["Employee"]).distinct()
+                        for emp in all_employees:
+                            if emp.id not in user_hours:
+                                # Try to fetch a timesheet for status/last_updated
+                                ts = Timesheet.objects.filter(
+                                    user=emp,
+                                    week_start__lte=week_end,
+                                    week_end__gte=week_start,
+                                ).order_by('week_start').first()
+
+                                user_hours[emp.id] = {
+                                    'user': emp,
+                                    'total_seconds': 0,
+                                    'status': ts.status if ts else None,
+                                    'last_updated': (ts.submitted_at if (ts and ts.submitted_at) else None)
+                                }
+
+            
+            # Track most recent update (use submitted_at or current time)
+            updated_at = entry.timesheet.submitted_at or timezone.now()
+            if not user_hours[user.id]['last_updated'] or (updated_at and updated_at > user_hours[user.id]['last_updated']):
+                user_hours[user.id]['last_updated'] = updated_at
+
+        # Build response
+        employees_data = []
+        total_seconds_week = 0
+
+        for user_id, data in user_hours.items():
+            user = data['user']
+            total_seconds = int(data['total_seconds'])
+            total_seconds_week += total_seconds
+            
+            last_updated = data['last_updated'] or timezone.now()
+
+            employees_data.append({
+                "employee": {
+                    "id": user.id,
+                    "name": user.get_full_name() or user.username,
+                    "username": user.username
+                },
+                "total_hours": round(total_seconds / 3600.0, 2),
+                "total_seconds": total_seconds,
+                "total_formatted": format_seconds(total_seconds)["formatted"],
+                "status": data['status'],
+                "last_updated": last_updated.isoformat()
+            })
+
+        # Generate week label
+        week_label = f"{week_start.strftime('%B %d')} - {week_end.strftime('%B %d, %Y')} (Week {week_start.isocalendar()[1]})"
+
+        response_data = {
+            "week": {
+                "start": week_start.isoformat(),
+                "end": week_end.isoformat(),
+                "label": week_label
+            },
+            "summary": {
+                "total_employees": len(user_hours),
+                "total_hours": round(total_seconds_week / 3600.0, 2),
+                "total_seconds": total_seconds_week,
+                "total_formatted": format_seconds(total_seconds_week)["formatted"],
+            },
+            "data": employees_data
+        }
+
+        return Response(response_data)
+
+class ExtraHoursHistoryAPIView(APIView):
+    """List approved/rejected extra hours requests."""
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request):
+        status_param = request.query_params.get("status", "approved,rejected")
+        statuses = {s.strip().lower() for s in status_param.split(",") if s.strip()}
+        allowed_statuses = {"approved", "rejected"}
+        statuses = list(statuses & allowed_statuses)
+        if not statuses:
+            statuses = list(allowed_statuses)
+
+        qs = TaskExtraHoursRequest.objects.filter(status__in=statuses).select_related(
+            "task", "requested_by", "reviewed_by"
+        )
+
+        # Access control: PM/Admin see all; others see only their own
+        is_pm_admin = request.user.roles.filter(role_name__in=["Project Manager", "Admin"]).exists()
+        if not is_pm_admin:
+            qs = qs.filter(requested_by=request.user)
+
+        # Optional filters
+        task_id = request.query_params.get("task_id")
+        if task_id:
+            qs = qs.filter(task_id=task_id)
+
+        user_id = request.query_params.get("user_id")
+        if user_id:
+            qs = qs.filter(requested_by_id=user_id)
+
+        data = []
+        for r in qs.order_by("-reviewed_at", "-id"):
+            prev_alloc = r.previous_allocated_hours
+            appr_alloc = r.approved_allocated_hours
+            requested_hours = r.requested_hours
+            data.append({
+                "id": r.id,
+                "task": r.task.title if r.task else None,
+                "task_id": r.task.id if r.task else None,
+                "requested_by": r.requested_by.username if r.requested_by else None,
+                "requested_hours": requested_hours,
+                "requested_formatted": format_seconds(int(float(requested_hours) * 3600))["formatted"] if requested_hours is not None else None,
+                "previous_allocated_hours": prev_alloc,
+                "previous_allocated_formatted": format_seconds(int(float(prev_alloc) * 3600))["formatted"] if prev_alloc is not None else None,
+                "approved_allocated_hours": appr_alloc,
+                "approved_allocated_formatted": format_seconds(int(float(appr_alloc) * 3600))["formatted"] if appr_alloc is not None else None,
+                "status": r.status,
+                "reviewed_by": r.reviewed_by.username if r.reviewed_by else None,
+                "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+                "reason": r.reason,
+            })
+
+        return Response(data)

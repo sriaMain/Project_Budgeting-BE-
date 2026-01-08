@@ -132,8 +132,17 @@ class QuoteItem(models.Model):
     cost = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     
     # This can be calculated automatically on save
-    amount = models.DecimalField(max_digits=15, decimal_places=2, editable=False)
+    amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        editable=False
+    )
 
+    # ✅ EXECUTION DECISION (MOST IMPORTANT)
+    is_outsourced = models.BooleanField(
+        default=False,
+        help_text="If true, this item requires Purchase Order"
+    )
     # Optional tracking numbers
     po_number = models.CharField(max_length=50, blank=True, null=True)
     bill_number = models.CharField(max_length=50, blank=True, null=True)
