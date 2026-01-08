@@ -1,9 +1,12 @@
 from datetime import timedelta
 
 def get_week_range(date):
-    monday = date - timedelta(days=date.weekday())
-    sunday = monday + timedelta(days=6)
-    return monday, sunday
+    """Return the week range as Sunday (start) to Saturday (end)."""
+    # Python weekday(): Monday=0 ... Sunday=6
+    # To get the Sunday of the current week:
+    sunday = date - timedelta(days=(date.weekday() + 1) % 7)
+    saturday = sunday + timedelta(days=6)
+    return sunday, saturday
 
 
 from django_redis import get_redis_connection

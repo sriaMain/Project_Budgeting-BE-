@@ -173,8 +173,8 @@ class Timesheet(models.Model):
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    week_start = models.DateField()  # Monday
-    week_end = models.DateField()    # Sunday
+    week_start = models.DateField()  # Sunday
+    week_end = models.DateField()    # Saturday
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     submitted_at = models.DateTimeField(null=True, blank=True)
 
@@ -221,6 +221,7 @@ class TaskTimerLog(models.Model):
 
     duration_minutes = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    is_extra = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -258,7 +259,7 @@ class TaskExtraHoursRequest(models.Model):
         related_name="extra_hour_requests"
     )
 
-    requested_hours = models.DecimalField(max_digits=5, decimal_places=2)
+    requested_hours = models.DecimalField(max_digits=7, decimal_places=2)
     reason = models.TextField()
     previous_allocated_hours = models.DecimalField(
         max_digits=5, decimal_places=2, null=True, blank=True
