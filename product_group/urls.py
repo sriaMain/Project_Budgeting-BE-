@@ -19,6 +19,6 @@ urlpatterns = [
     path('quotes/<int:pk>/', QuoteDetailView.as_view(), name='quote-detail'),
     path('quotes/<int:pk>/send/', SendQuoteEmailView.as_view(), name='quote-send-email'),
     path('pipeline-data/', PipelineDataAPIView.as_view(), name='pipeline-data'),
-    path('quotes/<int:pk>/invoice/', QuoteInvoiceDownloadView.as_view(), name='quote-download-invoice'),
+    path('quotes/<int:pk>/pdf/', QuoteInvoiceDownloadView.as_view(), name='quote-download-invoice'),
 
 ]
