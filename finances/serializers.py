@@ -5,6 +5,7 @@ from django.utils import timezone
 from django.core.exceptions import ValidationError as DjangoValidationError
 from datetime import datetime, date
 from .models import Invoice, InvoiceItem, InvoicePayment
+from Project.models import Project
 
 
 
@@ -85,7 +86,7 @@ class InvoicePaymentSerializer(serializers.ModelSerializer):
 
             'payment_date',
             'amount',
-            # 'payment_method',
+            'payment_method',
             'payment_method_display',
             'reference_no',
             'notes',
@@ -145,7 +146,41 @@ class RecordPaymentSerializer(serializers.Serializer):
         return value
 
 
+class ProjectDetailSerializer(serializers.ModelSerializer):
+    """Nested serializer for project details"""
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    project_manager_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Project
+        fields = ['project_no', 'project_name', 'project_type', 'status_display', 
+                  'currency', 'start_date', 'end_date', 'project_manager_name']
+        read_only_fields = ['project_no', 'project_name', 'project_type', 'status_display', 
+                            'currency', 'start_date', 'end_date', 'project_manager_name']
+    
+    def get_project_manager_name(self, obj):
+        return obj.project_manager.get_full_name() if obj.project_manager else None
 
+
+class ProjectPaymentDetailSerializer(serializers.Serializer):
+    """Serializer for project-related payments"""
+    id = serializers.IntegerField()
+    invoice_id = serializers.IntegerField()
+    invoice_no = serializers.CharField()
+    payment_date = serializers.DateField()
+    amount = serializers.DecimalField(max_digits=15, decimal_places=2)
+    payment_method = serializers.CharField()
+    reference_no = serializers.CharField()
+    created_by_name = serializers.CharField()
+
+
+class ProjectPaymentSummarySerializer(serializers.Serializer):
+    """Serializer for project payment summary"""
+    project_no = serializers.IntegerField()
+    project_name = serializers.CharField()
+    total_payments = serializers.DecimalField(max_digits=15, decimal_places=2)
+    payment_count = serializers.IntegerField()
+    payments = ProjectPaymentDetailSerializer(many=True)
 
 class InvoiceListSerializer(serializers.ModelSerializer):
     """Compact serializer for invoice list view"""
@@ -158,6 +193,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
     payment_percentage = serializers.SerializerMethodField()
     days_until_due = serializers.SerializerMethodField()
     is_overdue = serializers.SerializerMethodField()
+    project = ProjectDetailSerializer(read_only=True, allow_null=True)
     
     class Meta:
         model = Invoice
@@ -179,7 +215,8 @@ class InvoiceListSerializer(serializers.ModelSerializer):
             'balance_amount',
             'payment_status',
             'payment_percentage',
-            'created_at'
+            'created_at',
+            'project',
         ]
     
     def get_client_email(self, obj):
@@ -216,6 +253,9 @@ class InvoiceListSerializer(serializers.ModelSerializer):
 
 
 
+
+
+
 class InvoiceDetailSerializer(serializers.ModelSerializer):
 
     client_id = serializers.IntegerField(source='client.id', read_only=True)
@@ -224,8 +264,7 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
     quote_id = serializers.IntegerField(source='quote.id', read_only=True)
     quote_no = serializers.CharField(source='quote.quote_no', read_only=True)
 
-    project_id = serializers.IntegerField(source='project.id', read_only=True, allow_null=True)
-    project_name = serializers.CharField(source='project.name', read_only=True, allow_null=True)
+    project = ProjectDetailSerializer(read_only=True, allow_null=True)
 
     status_display = serializers.CharField(source='get_status_display', read_only=True)
 
@@ -266,65 +305,6 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
     def get_days_until_due(self, obj):
         return (obj.due_date - timezone.now().date()).days
 
-# ==============================================================================
-# INVOICE GENERATION SERIALIZER
-# ==============================================================================
-
-# class GenerateInvoiceSerializer(serializers.Serializer):
-#     """Serializer for generating invoice from quote"""
-#     quote_id = serializers.IntegerField()
-#     due_days = serializers.IntegerField(default=30, min_value=1, max_value=365)
-#     # include_milestones = serializers.BooleanField(default=False)
-#     # milestones = serializers.ListField(
-#     #     child=MilestoneCreateSerializer(),
-#     #     required=False,
-#     #     allow_empty=True
-#     # )
-#     product_service_id = serializers.IntegerField(
-#         required=False,
-#         allow_null=True
-#     )
-#     product_service_ids = serializers.ListField(
-#         child=serializers.IntegerField(),
-#         required=False,
-#         allow_empty=True
-#     )
-#     product_group_id = serializers.IntegerField(
-#         required=False,
-#         allow_null=True
-#     )
-#     notes = serializers.CharField(required=False, allow_blank=True)
-#     terms_conditions = serializers.CharField(required=False, allow_blank=True)
-    
-#     def validate_milestones(self, value):
-#         """Validate milestones sum to 100%"""
-#         if not value:
-#             return value
-        
-#         total_percentage = sum(Decimal(str(m['percentage'])) for m in value)
-        
-#         if total_percentage != 100:
-#             raise serializers.ValidationError(
-#                 f"Total milestone percentages must equal 100%, got {total_percentage}%"
-#             )
-        
-#         return value
-    
-    
-
-#     def validate(self, data):
-#         # Ensure only one of product_service_id, product_service_ids, product_group_id is provided
-#         ps_single = 'product_service_id' in data and data.get('product_service_id') is not None
-#         ps_list = 'product_service_ids' in data and data.get('product_service_ids')
-#         pg = 'product_group_id' in data and data.get('product_group_id') is not None
-
-#         provided = sum(bool(x) for x in [ps_single, bool(ps_list), pg])
-#         if provided > 1:
-#             raise serializers.ValidationError(
-#                 "Provide only one of product_service_id, product_service_ids, or product_group_id"
-#             )
-
-#         return data
 class GenerateInvoiceSerializer(serializers.Serializer):
     quote_id = serializers.IntegerField()
     due_days = serializers.IntegerField(default=30, min_value=1, max_value=365)
@@ -372,10 +352,6 @@ class GenerateInvoiceSerializer(serializers.Serializer):
 
 
 
-# ==============================================================================
-# EMAIL SERIALIZER
-# ==============================================================================
-
 class SendInvoiceEmailSerializer(serializers.Serializer):
     """Serializer for sending invoice via email"""
     recipient_emails = serializers.ListField(
@@ -402,9 +378,7 @@ class SendInvoiceEmailSerializer(serializers.Serializer):
         return []
 
 
-# ==============================================================================
-# CANCEL INVOICE SERIALIZER
-# ==============================================================================
+
 
 class CancelInvoiceSerializer(serializers.Serializer):
     """Serializer for cancelling an invoice"""
@@ -484,39 +458,67 @@ class UpdateInvoiceSerializer(serializers.ModelSerializer):
         return value
 
 
-
-
-
-from rest_framework import serializers
-from .models import *
-
+from .models import PurchaseOrder, PurchaseOrderItem
 class PurchaseOrderItemSerializer(serializers.ModelSerializer):
+    product_service_name = serializers.CharField(
+        source='quote_item.product_service.product_service_name',
+        read_only=True
+    )
+
     class Meta:
         model = PurchaseOrderItem
-        fields = '__all__'
-
+        fields = [
+            'id',
+            'quote_item',
+            'product_service_name',
+            'quantity',
+            'price_per_unit',
+            'amount'
+        ]
+        read_only_fields = ['amount']
 
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     items = PurchaseOrderItemSerializer(many=True, read_only=True)
+    vendor_name = serializers.CharField(source='vendor.name', read_only=True)
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
 
     class Meta:
         model = PurchaseOrder
-        fields = '__all__'
-
-
-class VendorBillSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = VendorBill
-        read_only_fields = (
-            'total_amount',
-            'paid_amount',
-            'balance_amount',
+        fields = [
+            'id',
+            'po_number',
+            'quote',
+            'vendor',
+            'vendor_name',
+            'employee',
+            'employee_name',
             'status',
-        )
-        fields = '__all__'
+            'total_amount',
+            'created_at',
+            'updated_at',
+            'items'
+        ]
 
+class PurchaseOrderCreateSerializer(serializers.Serializer):
+    quote_id = serializers.IntegerField()
 
-class OutgoingPaymentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = OutgoingPayment
-        fields = '__all__'
+    vendor_id = serializers.IntegerField(required=False, allow_null=True)
+    employee_id = serializers.IntegerField(required=False, allow_null=True)
+
+    items = serializers.ListField(
+        child=serializers.DictField(),
+        allow_empty=False
+    )
+
+    def validate(self, data):
+        if not data.get('vendor_id') and not data.get('employee_id'):
+            raise serializers.ValidationError(
+                "Either vendor_id or employee_id is required."
+            )
+
+        if data.get('vendor_id') and data.get('employee_id'):
+            raise serializers.ValidationError(
+                "Select either vendor OR employee, not both."
+            )
+
+        return data

@@ -7,7 +7,10 @@ from .views import (QuotationDetailView, InvoiceListView, InvoiceDetailView,
                     GenerateInvoiceView, RecordPaymentView, InvoicePaymentListView,  
                     DownloadInvoicePDFView, SendInvoiceEmailView, CancelInvoiceView,
                     InvoiceShareableLinkView, PublicInvoiceView, InvoiceStatisticsView, DownloadInvoicePDFView,PublicInvoicePDFView,ShareInvoiceLinkView,
-                    PurchaseOrderListView, PurchaseOrderDetailView, CreatePurchaseOrderView, VendorBillListView, CreateVendorBillView, RecordOutgoingPaymentView)
+                    ProjectPaymentAPIView, ProjectPaymentSummaryAPIView, ProjectPaymentsListAPIView,
+               
+                    PurchaseOrderCreateAPIView, QuotePurchaseOrderListAPIView, PurchaseOrderDetailAPIView,
+                    PurchaseOrderStatusUpdateAPIView)
 
 urlpatterns = [
     path("test/", lambda r: HttpResponse("FINANCES OK")),
@@ -77,13 +80,57 @@ urlpatterns = [
         "invoices/<int:invoice_id>/share-link/",
         ShareInvoiceLinkView.as_view()
     ),
+    path(
+        'projects/<int:project_id>/payments/',
+        ProjectPaymentAPIView.as_view(),
+        name='project-payments'
+    ),
+
+    # Project payment summary
+    path(
+        'projects/<int:project_id>/payments/summary/',
+        ProjectPaymentSummaryAPIView.as_view(),
+        name='project-payment-summary'
+    ),
+
+    # Project payments list
+    path(
+        'projects/<int:project_id>/payments-list/',
+        ProjectPaymentsListAPIView.as_view(),
+        name='project-payments-list'
+    ),
     
     # Purchase Orders
-    path('purchase-orders/', PurchaseOrderListView.as_view(), name='po-list'),
-    path('purchase-orders/<int:po_id>/', PurchaseOrderDetailView.as_view(), name='po-detail'),
-    path('purchase-orders/create/', CreatePurchaseOrderView.as_view(), name='po-create'),
-    path('vendor-bills/', VendorBillListView.as_view()),
-    path('vendor-bills/create/', CreateVendorBillView.as_view()),
+#     path('purchase-orders/', PurchaseOrderListView.as_view(), name='po-list'),
+#     path('purchase-orders/<int:po_id>/', PurchaseOrderDetailView.as_view(), name='po-detail'),
+#     path('purchase-orders/create/', CreatePurchaseOrderView.as_view(), name='po-create'),
+#     path('vendor-bills/', VendorBillListView.as_view()),
+#     path('vendor-bills/create/', CreateVendorBillView.as_view()),
+     path(
+        'purchase-orders/',
+        PurchaseOrderCreateAPIView.as_view(),
+        name='purchase-order-create'
+    ),
+
+    path(
+        'quotes/<int:quote_id>/purchase-orders/',
+        QuotePurchaseOrderListAPIView.as_view(),
+        name='quote-purchase-orders'
+    ),
+     path(
+        'purchase-orders/<int:po_id>/',
+        PurchaseOrderDetailAPIView.as_view(),
+        name='purchase-order-detail'
+    ),
+
+    path(
+        'purchase-orders/<int:po_id>/status/',
+        PurchaseOrderStatusUpdateAPIView.as_view(),
+        name='purchase-order-status'
+    ),
+
+
+
 ]
 
 

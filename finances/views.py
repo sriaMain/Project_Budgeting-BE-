@@ -19,7 +19,7 @@ from .serializers import (
     InvoiceListSerializer, InvoiceDetailSerializer, InvoiceItemSerializer,
     InvoicePaymentSerializer,
     GenerateInvoiceSerializer, RecordPaymentSerializer,
-    SendInvoiceEmailSerializer, CancelInvoiceSerializer, InvoiceStatsSerializer, PurchaseOrderSerializer,VendorBillSerializer,OutgoingPaymentSerializer   
+    SendInvoiceEmailSerializer, CancelInvoiceSerializer, InvoiceStatsSerializer, PurchaseOrderSerializer,
 )
 from .services import InvoiceService
 from django.core.exceptions import ValidationError
@@ -805,252 +805,599 @@ class ShareInvoiceLinkView(APIView):
         })
 
 
-# ============================================================================
-# PURCHASE ORDER VIEWS
-# ============================================================================
+# # ============================================================================
+# # PURCHASE ORDER VIEWS
+# # ============================================================================
 
-class PurchaseOrderListView(APIView):
-    """
-    List all purchase orders with filters
+# class PurchaseOrderListView(APIView):
+#     """
+#     List all purchase orders with filters
     
-    GET /api/purchase-orders/
-    Query Params:
-        - status: filter by status (draft, issued, completed, cancelled)
-        - vendor_id: filter by vendor
-        - page: page number
-        - page_size: items per page
-    """
+#     GET /api/purchase-orders/
+#     Query Params:
+#         - status: filter by status (draft, issued, completed, cancelled)
+#         - vendor_id: filter by vendor
+#         - page: page number
+#         - page_size: items per page
+#     """
+#     permission_classes = [IsAuthenticated]
+#     authentication_classes = [JWTAuthentication]
+    
+#     def get(self, request):
+#         from .models import PurchaseOrder
+        
+#         queryset = PurchaseOrder.objects.select_related(
+#             'vendor', 'quote', 'project', 'created_by'
+#         ).prefetch_related('items')
+        
+#         # Apply filters
+#         status_filter = request.query_params.get('status')
+#         vendor_id = request.query_params.get('vendor_id')
+        
+#         if status_filter:
+#             queryset = queryset.filter(status=status_filter)
+        
+#         if vendor_id:
+#             queryset = queryset.filter(vendor_id=vendor_id)
+        
+#         # Pagination
+#         page = int(request.query_params.get('page', 1))
+#         page_size = int(request.query_params.get('page_size', 20))
+        
+#         start = (page - 1) * page_size
+#         end = start + page_size
+        
+#         total_count = queryset.count()
+#         purchase_orders = queryset.order_by('-issue_date')[start:end]
+        
+#         from .serializers import PurchaseOrderSerializer
+#         serializer = PurchaseOrderSerializer(purchase_orders, many=True)
+        
+#         return Response({
+#             'count': total_count,
+#             'page': page,
+#             'page_size': page_size,
+#             'total_pages': (total_count + page_size - 1) // page_size,
+#             'results': serializer.data
+#         }, status=status.HTTP_200_OK)
+
+
+# class PurchaseOrderDetailView(APIView):
+#     """
+#     Get, update, or delete a purchase order
+    
+#     GET /api/purchase-orders/<po_id>/
+#     PUT /api/purchase-orders/<po_id>/
+#     DELETE /api/purchase-orders/<po_id>/
+#     """
+#     permission_classes = [IsAuthenticated]
+#     authentication_classes = [JWTAuthentication]
+    
+#     def get(self, request, po_id):
+#         from .models import PurchaseOrder
+#         from .serializers import PurchaseOrderSerializer
+        
+#         po = get_object_or_404(PurchaseOrder, id=po_id)
+#         serializer = PurchaseOrderSerializer(po)
+#         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+#     def put(self, request, po_id):
+#         from .models import PurchaseOrder
+#         from .serializers import PurchaseOrderSerializer
+        
+#         po = get_object_or_404(PurchaseOrder, id=po_id)
+        
+#         if po.status != 'draft':
+#             return Response(
+#                 {"error": "Only draft POs can be edited"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+        
+#         serializer = PurchaseOrderSerializer(po, data=request.data, partial=True)
+#         if serializer.is_valid():
+#             serializer.save()
+#             return Response(serializer.data, status=status.HTTP_200_OK)
+        
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+#     def delete(self, request, po_id):
+#         from .models import PurchaseOrder
+        
+#         po = get_object_or_404(PurchaseOrder, id=po_id)
+        
+#         if po.status != 'draft':
+#             return Response(
+#                 {"error": "Only draft POs can be deleted"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+        
+#         po.delete()
+#         return Response(
+#             {"message": "Purchase order deleted successfully"},
+#             status=status.HTTP_204_NO_CONTENT
+#         )
+
+
+# class CreatePurchaseOrderView(APIView):
+#     """
+#     Create a new purchase order from a quote
+    
+#     POST /api/purchase-orders/create/
+#     {
+#         "quote_id": 47,
+#         "vendor_id": 2,
+#         "project_id": 22,
+#         "quote_item_ids": [67, 68]
+#     }
+#     """
+#     permission_classes = [IsAuthenticated]
+#     authentication_classes = [JWTAuthentication]
+    
+#     @transaction.atomic
+#     def post(self, request):
+#         from .models import PurchaseOrder, PurchaseOrderItem
+#         from product_group.models import Quote
+        
+#         quote_id = request.data.get('quote_id')
+#         vendor_id = request.data.get('vendor_id')
+#         project_id = request.data.get('project_id')
+#         quote_item_ids = request.data.get('quote_item_ids', [])
+        
+#         if not all([quote_id, vendor_id, project_id]):
+#             return Response(
+#                 {"error": "quote_id, vendor_id, and project_id are required"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+        
+#         try:
+#             quote = Quote.objects.get(quote_no=quote_id)
+#             vendor = Vendor.objects.get(id=vendor_id)
+#             project = Project.objects.get(id=project_id)
+#         except (Quote.DoesNotExist, Vendor.DoesNotExist, Project.DoesNotExist) as e:
+#             return Response(
+#                 {"error": f"Invalid reference: {str(e)}"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+        
+#         # Get quote items
+#         quote_items = quote.items.all()
+#         if quote_item_ids:
+#             quote_items = quote_items.filter(id__in=quote_item_ids)
+        
+#         if not quote_items.exists():
+#             return Response(
+#                 {"error": "No quote items found for PO"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+        
+#         # Generate PO number
+#         from datetime import datetime
+#         po_no = f"PO-{datetime.now().strftime('%Y%m')}-{PurchaseOrder.objects.count() + 1:04d}"
+        
+#         # Create PO
+#         po = PurchaseOrder.objects.create(
+#             po_no=po_no,
+#             vendor=vendor,
+#             quote=quote,
+#             project=project,
+#             status='draft',
+#             created_by=request.user
+#         )
+        
+#         # Create PO items
+#         for item in quote_items:
+#             PurchaseOrderItem.objects.create(
+#                 purchase_order=po,
+#                 quote_item=item,
+#                 description=item.description,
+#                 quantity=item.quantity,
+#                 unit_rate=item.price_per_unit
+#             )
+        
+#         from .serializers import PurchaseOrderSerializer
+#         serializer = PurchaseOrderSerializer(po)
+        
+#         return Response(
+#             {
+#                 "message": f"Purchase order {po.po_no} created successfully",
+#                 "purchase_order": serializer.data
+#             },
+#             status=status.HTTP_201_CREATED
+#         )
+
+
+# class VendorBillListView(APIView):
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         bills = VendorBill.objects.select_related('vendor', 'purchase_order')
+#         serializer = VendorBillSerializer(bills, many=True)
+#         return Response(serializer.data)
+# class CreateVendorBillView(APIView):
+#     permission_classes = [IsAuthenticated]
+
+#     def post(self, request):
+#         po = get_object_or_404(PurchaseOrder, id=request.data['purchase_order_id'])
+
+#         bill = VendorBill.objects.create(
+#             bill_no=request.data['bill_no'],
+#             vendor=po.vendor,
+#             purchase_order=po,
+#             bill_date=request.data['bill_date'],
+#             due_date=request.data['due_date'],
+#         )
+
+#         serializer = VendorBillSerializer(bill)
+#         return Response(
+#             {
+#                 "message": "Vendor bill created",
+#                 "bill": serializer.data
+#             },
+#             status=201
+#         )
+
+
+# class RecordOutgoingPaymentView(APIView):
+#     permission_classes = [IsAuthenticated]
+
+#     def post(self, request, bill_id):
+#         bill = get_object_or_404(VendorBill, id=bill_id)
+
+#         serializer = OutgoingPaymentSerializer(data=request.data)
+#         if serializer.is_valid():
+#             serializer.save(
+#                 vendor_bill=bill,
+#                 vendor=bill.vendor
+#             )
+#             return Response(
+#                 {"message": "Payment recorded successfully"},
+#                 status=201
+#             )
+#         return Response(serializer.errors, status=400)
+
+
+
+class ProjectPaymentAPIView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
-    
-    def get(self, request):
-        from .models import PurchaseOrder
-        
-        queryset = PurchaseOrder.objects.select_related(
-            'vendor', 'quote', 'project', 'created_by'
-        ).prefetch_related('items')
-        
-        # Apply filters
-        status_filter = request.query_params.get('status')
-        vendor_id = request.query_params.get('vendor_id')
-        
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
-        
-        if vendor_id:
-            queryset = queryset.filter(vendor_id=vendor_id)
-        
-        # Pagination
-        page = int(request.query_params.get('page', 1))
-        page_size = int(request.query_params.get('page_size', 20))
-        
-        start = (page - 1) * page_size
-        end = start + page_size
-        
-        total_count = queryset.count()
-        purchase_orders = queryset.order_by('-issue_date')[start:end]
-        
-        from .serializers import PurchaseOrderSerializer
-        serializer = PurchaseOrderSerializer(purchase_orders, many=True)
-        
-        return Response({
-            'count': total_count,
-            'page': page,
-            'page_size': page_size,
-            'total_pages': (total_count + page_size - 1) // page_size,
-            'results': serializer.data
-        }, status=status.HTTP_200_OK)
 
+    def get(self, request, project_id):
+        """
+        List all payments related to a project
+        """
+        project = get_object_or_404(Project, id=project_id)
 
-class PurchaseOrderDetailView(APIView):
-    """
-    Get, update, or delete a purchase order
-    
-    GET /api/purchase-orders/<po_id>/
-    PUT /api/purchase-orders/<po_id>/
-    DELETE /api/purchase-orders/<po_id>/
-    """
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
-    
-    def get(self, request, po_id):
-        from .models import PurchaseOrder
-        from .serializers import PurchaseOrderSerializer
-        
-        po = get_object_or_404(PurchaseOrder, id=po_id)
-        serializer = PurchaseOrderSerializer(po)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-    
-    def put(self, request, po_id):
-        from .models import PurchaseOrder
-        from .serializers import PurchaseOrderSerializer
-        
-        po = get_object_or_404(PurchaseOrder, id=po_id)
-        
-        if po.status != 'draft':
-            return Response(
-                {"error": "Only draft POs can be edited"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        serializer = PurchaseOrderSerializer(po, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    def delete(self, request, po_id):
-        from .models import PurchaseOrder
-        
-        po = get_object_or_404(PurchaseOrder, id=po_id)
-        
-        if po.status != 'draft':
-            return Response(
-                {"error": "Only draft POs can be deleted"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        po.delete()
-        return Response(
-            {"message": "Purchase order deleted successfully"},
-            status=status.HTTP_204_NO_CONTENT
+        payments = (
+            InvoicePayment.objects
+            .filter(invoice__project=project)
+            .select_related('invoice', 'created_by')
+            .order_by('-payment_date', '-created_at')
         )
 
+        serializer = InvoicePaymentSerializer(payments, many=True)
 
-class CreatePurchaseOrderView(APIView):
-    """
-    Create a new purchase order from a quote
-    
-    POST /api/purchase-orders/create/
-    {
-        "quote_id": 47,
-        "vendor_id": 2,
-        "project_id": 22,
-        "quote_item_ids": [67, 68]
-    }
-    """
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
-    
-    @transaction.atomic
-    def post(self, request):
-        from .models import PurchaseOrder, PurchaseOrderItem
-        from product_group.models import Quote
-        
-        quote_id = request.data.get('quote_id')
-        vendor_id = request.data.get('vendor_id')
-        project_id = request.data.get('project_id')
-        quote_item_ids = request.data.get('quote_item_ids', [])
-        
-        if not all([quote_id, vendor_id, project_id]):
+        return Response({
+            "project_id": project.id,
+            "project_name": project.name,
+            "count": payments.count(),
+            "payments": serializer.data
+        })
+
+    def post(self, request, project_id):
+        """
+        Create a payment for a project invoice
+        """
+        project = get_object_or_404(Project, id=project_id)
+
+        invoice_id = request.data.get('invoice')
+        if not invoice_id:
             return Response(
-                {"error": "quote_id, vendor_id, and project_id are required"},
+                {"detail": "Invoice ID is required."},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        try:
-            quote = Quote.objects.get(quote_no=quote_id)
-            vendor = Vendor.objects.get(id=vendor_id)
-            project = Project.objects.get(id=project_id)
-        except (Quote.DoesNotExist, Vendor.DoesNotExist, Project.DoesNotExist) as e:
-            return Response(
-                {"error": f"Invalid reference: {str(e)}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Get quote items
-        quote_items = quote.items.all()
-        if quote_item_ids:
-            quote_items = quote_items.filter(id__in=quote_item_ids)
-        
-        if not quote_items.exists():
-            return Response(
-                {"error": "No quote items found for PO"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Generate PO number
-        from datetime import datetime
-        po_no = f"PO-{datetime.now().strftime('%Y%m')}-{PurchaseOrder.objects.count() + 1:04d}"
-        
-        # Create PO
-        po = PurchaseOrder.objects.create(
-            po_no=po_no,
-            vendor=vendor,
-            quote=quote,
-            project=project,
-            status='draft',
+
+        # 🔒 Ensure invoice belongs to this project
+        invoice = get_object_or_404(
+            Invoice,
+            id=invoice_id,
+            project=project
+        )
+
+        serializer = InvoicePaymentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        payment = serializer.save(
+            invoice=invoice,
             created_by=request.user
         )
-        
-        # Create PO items
-        for item in quote_items:
-            PurchaseOrderItem.objects.create(
-                purchase_order=po,
-                quote_item=item,
-                description=item.description,
-                quantity=item.quantity,
-                unit_rate=item.price_per_unit
-            )
-        
-        from .serializers import PurchaseOrderSerializer
-        serializer = PurchaseOrderSerializer(po)
-        
+
         return Response(
             {
-                "message": f"Purchase order {po.po_no} created successfully",
-                "purchase_order": serializer.data
+                "message": "Payment recorded successfully",
+                "payment": InvoicePaymentSerializer(payment).data
             },
             status=status.HTTP_201_CREATED
         )
 
 
-class VendorBillListView(APIView):
+class ProjectPaymentSummaryAPIView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
-    def get(self, request):
-        bills = VendorBill.objects.select_related('vendor', 'purchase_order')
-        serializer = VendorBillSerializer(bills, many=True)
-        return Response(serializer.data)
-class CreateVendorBillView(APIView):
-    permission_classes = [IsAuthenticated]
+    def get(self, request, project_id):
+        project = get_object_or_404(Project, id=project_id)
 
-    def post(self, request):
-        po = get_object_or_404(PurchaseOrder, id=request.data['purchase_order_id'])
+        invoices = Invoice.objects.filter(project=project)
 
-        bill = VendorBill.objects.create(
-            bill_no=request.data['bill_no'],
-            vendor=po.vendor,
-            purchase_order=po,
-            bill_date=request.data['bill_date'],
-            due_date=request.data['due_date'],
+        summary = invoices.aggregate(
+            total_invoiced=Sum('total_amount'),
+            total_paid=Sum('paid_amount'),
+            total_balance=Sum('balance_amount')
         )
 
-        serializer = VendorBillSerializer(bill)
+        return Response({
+            "project_id": project.id,
+            "project_name": project.name,
+            "total_invoiced": summary['total_invoiced'] or 0,
+            "total_paid": summary['total_paid'] or 0,
+            "total_balance": summary['total_balance'] or 0
+        })
+
+
+class ProjectPaymentsListAPIView(APIView):
+    """
+    Get all payments for a specific project
+    
+    GET /api/projects/<project_id>/payments/
+    """
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request, project_id):
+        """Get all payments for a project"""
+        project = get_object_or_404(Project, project_no=project_id)
+        
+        # Get all invoices for this project
+        invoices = project.invoice_set.all()
+        
+        # Get all payments for those invoices
+        payments = InvoicePayment.objects.filter(
+            invoice__in=invoices
+        ).select_related('created_by', 'invoice').order_by('-payment_date')
+        
+        # Build payment data
+        payment_data = []
+        for payment in payments:
+            payment_data.append({
+                'id': payment.id,
+                'invoice_id': payment.invoice.id,
+                'invoice_no': payment.invoice.invoice_no,
+                'payment_date': payment.payment_date,
+                'amount': str(payment.amount),
+                'payment_method': payment.get_payment_method_display(),
+                'reference_no': payment.reference_no,
+                'notes': payment.notes,
+                'created_by_name': payment.created_by.get_full_name() if payment.created_by else None,
+                'created_at': payment.created_at
+            })
+        
+        # Calculate totals
+        total_payments = sum(float(p['amount']) for p in payment_data)
+        
+        return Response({
+            'project_no': project.project_no,
+            'project_name': project.project_name,
+            'invoice_count': invoices.count(),
+            'total_invoiced': str(invoices.aggregate(Sum('total_amount'))['total_amount__sum'] or 0),
+            'total_payments': str(total_payments),
+            'payment_count': len(payment_data),
+            'payments': payment_data
+        }, status=status.HTTP_200_OK)
+from .serializers import (
+    PurchaseOrderCreateSerializer,
+    PurchaseOrderSerializer
+)
+from .models import PurchaseOrder, PurchaseOrderItem
+from product_group.models import Quote, QuoteItem   
+from accounts.models import Account,Vendor
+
+# class PurchaseOrderCreateAPIView(APIView):
+    # permission_classes = [IsAuthenticated]
+    # authentication_classes = [JWTAuthentication]
+
+    # @transaction.atomic
+    # def post(self, request):
+    #     serializer = PurchaseOrderCreateSerializer(data=request.data)
+    #     serializer.is_valid(raise_exception=True)
+
+    #     quote = get_object_or_404(Quote, id=serializer.validated_data['quote_id'])
+
+    #     vendor = None
+    #     employee = None
+
+    #     if serializer.validated_data.get('vendor_id'):
+    #         vendor = get_object_or_404(Vendor, id=serializer.validated_data['vendor_id'])
+
+    #     if serializer.validated_data.get('employee_id'):
+    #         employee = get_object_or_404(Account, id=serializer.validated_data['employee_id'])
+
+    #     po = PurchaseOrder.objects.create(
+    #         po_number=f"PO-{quote.id}-{PurchaseOrder.objects.count() + 1}",
+    #         quote=quote,
+    #         vendor=vendor,
+    #         employee=employee,
+    #         created_by=request.user
+    #     )
+
+    #     total = 0
+
+    #     for item in serializer.validated_data['items']:
+    #         quote_item = get_object_or_404(QuoteItem, id=item['quote_item_id'])
+
+    #         po_item = PurchaseOrderItem.objects.create(
+    #             purchase_order=po,
+    #             quote_item=quote_item,
+    #             quantity=item['quantity'],
+    #             price_per_unit=quote_item.price_per_unit
+    #         )
+
+    #         total += po_item.amount
+
+    #     po.total_amount = total
+    #     po.save()
+
+    #     return Response(
+    #         {
+    #             "message": "Purchase Order created successfully",
+    #             "purchase_order": PurchaseOrderSerializer(po).data
+    #         },
+    #         status=status.HTTP_201_CREATED
+    #     )
+
+
+
+
+class PurchaseOrderCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]    
+    @transaction.atomic
+    def post(self, request):
+        """
+        Create Purchase Order from Quote
+        """
+
+        # 🔒 Validate required fields
+        quote_no = request.data.get("quote_no")
+        vendor_id = request.data.get("vendor_id")
+        items = request.data.get("items", [])
+
+        if not quote_no:
+            return Response(
+                {"detail": "quote_no is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not vendor_id:
+            return Response(
+                {"detail": "vendor_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not items:
+            return Response(
+                {"detail": "At least one item is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 🔗 Fetch objects safely
+        quote = get_object_or_404(Quote, quote_no=quote_no)
+        vendor = get_object_or_404(Vendor, id=vendor_id)
+
+        # 🔢 Generate PO number
+        po_no = f"PO-{quote.quote_no}-{PurchaseOrder.objects.count() + 1}"
+
+        # 🧾 Create Purchase Order
+        po = PurchaseOrder.objects.create(
+            po_no=po_no,
+            quote=quote,
+            project=quote.project,
+            vendor=vendor,
+            created_by=request.user,
+            issue_date=timezone.now()
+        )
+
+        total = Decimal("0.00")
+
+        # 📦 Create PO Items
+        for item in items:
+            quote_item_id = item.get("quote_item_id")
+            quantity = item.get("quantity")
+            unit_rate = item.get("unit_rate")  # optional
+
+            if not quote_item_id or not quantity:
+                return Response(
+                    {"detail": "quote_item_id and quantity are required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            quote_item = get_object_or_404(
+                QuoteItem,
+                id=quote_item_id,
+                quote=quote
+            )
+
+            # ✅ SAFE DEFAULT (IMPORTANT FIX)
+            unit_rate = Decimal(unit_rate) if unit_rate else quote_item.price_per_unit
+
+            if unit_rate is None:
+                return Response(
+                    {
+                        "detail": f"unit_rate missing for quote_item {quote_item.id}"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            po_item = PurchaseOrderItem.objects.create(
+                purchase_order=po,
+                quote_item=quote_item,
+                description=quote_item.description,
+                quantity=Decimal(quantity),
+                unit_rate=unit_rate
+            )
+
+            total += po_item.amount
+
+        # 🔢 Update totals
+        po.sub_total = total
+        po.total_amount = total
+        po.save()
+
         return Response(
             {
-                "message": "Vendor bill created",
-                "bill": serializer.data
+                "message": "Purchase Order created successfully",
+                "po_no": po.po_no,
+                "total_amount": po.total_amount
             },
-            status=201
+            status=status.HTTP_201_CREATED
         )
 
 
-class RecordOutgoingPaymentView(APIView):
+
+
+class QuotePurchaseOrderListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request, bill_id):
-        bill = get_object_or_404(VendorBill, id=bill_id)
+    def get(self, request, quote_id):
+        purchase_orders = PurchaseOrder.objects.filter(
+            quote_id=quote_id
+        ).prefetch_related('items')
 
-        serializer = OutgoingPaymentSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save(
-                vendor_bill=bill,
-                vendor=bill.vendor
-            )
+        serializer = PurchaseOrderSerializer(purchase_orders, many=True)
+        return Response(serializer.data)
+class PurchaseOrderDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, po_id):
+        po = get_object_or_404(PurchaseOrder, id=po_id)
+        serializer = PurchaseOrderSerializer(po)
+        return Response(serializer.data)
+class PurchaseOrderStatusUpdateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, po_id):
+        po = get_object_or_404(PurchaseOrder, id=po_id)
+
+        status_value = request.data.get('status')
+        if status_value not in dict(PurchaseOrder.STATUS_CHOICES):
             return Response(
-                {"message": "Payment recorded successfully"},
-                status=201
+                {"detail": "Invalid status"},
+                status=status.HTTP_400_BAD_REQUEST
             )
-        return Response(serializer.errors, status=400)
+
+        po.status = status_value
+        po.save(update_fields=['status'])
+
+        return Response({
+            "message": "Status updated",
+            "status": po.status
+        })
