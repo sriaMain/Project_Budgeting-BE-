@@ -341,15 +341,19 @@ class QuoteSummarySerializer(serializers.ModelSerializer):
 		]
 
 	quote_value = serializers.DecimalField(source='total_amount', max_digits=15, decimal_places=2)
-
-
+from finances.models import  InvoiceItem
+from .models import Quote, QuoteItem
+from django.db.models import Sum
+from decimal import Decimal
 class QuoteItemDetailSerializer(serializers.ModelSerializer):
 	product_group = serializers.CharField(source='product_service.product_group.product_group_name', read_only=True)
 	product_name = serializers.CharField(source='product_service.product_service_name', read_only=True)
+	remaining_quantity = serializers.SerializerMethodField()
 
 	class Meta:
 		model = QuoteItem
 		fields = [
+			'id',
 			'product_group',
 			'product_name',
 			'quantity',
@@ -359,7 +363,17 @@ class QuoteItemDetailSerializer(serializers.ModelSerializer):
 			'cost',
 			'po_number',
 			'bill_number',
+			'remaining_quantity',
 		]
+
+	def get_remaining_quantity(self, obj):
+		invoiced_sum = InvoiceItem.objects.filter(
+			invoice__quote=obj.quote,
+			product_service_id=obj.product_service_id
+		).aggregate(total=Sum('quantity'))['total']
+		invoiced_sum = invoiced_sum or Decimal('0')
+		remaining = Decimal(str(obj.quantity)) - invoiced_sum
+		return Decimal('0') if remaining < 0 else remaining
 
 class ClientDetailSerializer(serializers.ModelSerializer):
 	class Meta:

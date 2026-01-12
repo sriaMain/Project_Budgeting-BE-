@@ -1,7 +1,7 @@
 # accounts/urls.py
 from django.urls import path
 from .views import (LoginView, OTPRequestView, OTPVerifyView, ResetPasswordView,ResendOTPView
-                    ,LogoutView, RefreshTokenCookieView, UserCreateView, UserListView, UserDetailVieW,VendorListCreateView)
+                    ,LogoutView, RefreshTokenCookieView, UserCreateView, UserListView, UserDetailVieW,VendorListCreateView, VendorChoicesAPIView)
 urlpatterns = [
     path('login/', LoginView.as_view(), name='login'),
     path('otp-request/', OTPRequestView.as_view(), name='otp-request'),
@@ -20,5 +20,7 @@ urlpatterns = [
     path("users/", UserListView.as_view(), name="user-detail"),
     path("users/<int:id>/", UserDetailVieW.as_view(), name="user-detail"),
     path('vendors/', VendorListCreateView.as_view(), name='vendor-list-create'),
+    path('vendors/<int:pk>/', VendorListCreateView.as_view(), name='vendor-detail'),
+    path("vendors/choices/",VendorChoicesAPIView.as_view(),name="vendor-choices"),
 
 ]

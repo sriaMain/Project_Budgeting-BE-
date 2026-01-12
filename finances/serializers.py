@@ -457,10 +457,10 @@ class UpdateInvoiceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Tax percentage must be between 0 and 100")
         return value
 
-
+from rest_framework import serializers
 from .models import PurchaseOrder, PurchaseOrderItem
 class PurchaseOrderItemSerializer(serializers.ModelSerializer):
-    product_service_name = serializers.CharField(
+    service_name = serializers.CharField(
         source='quote_item.product_service.product_service_name',
         read_only=True
     )
@@ -469,35 +469,48 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
         model = PurchaseOrderItem
         fields = [
             'id',
-            'quote_item',
-            'product_service_name',
+            'description',
             'quantity',
-            'price_per_unit',
-            'amount'
+            'unit_rate',
+            'amount',
+            'purchase_order',
+            'quote_item',
+            'service_name',   # ✅ added
         ]
-        read_only_fields = ['amount']
+
 
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     items = PurchaseOrderItemSerializer(many=True, read_only=True)
+    vendor_email = serializers.EmailField(
+        source='vendor.email',
+        read_only=True
+    )
     vendor_name = serializers.CharField(source='vendor.name', read_only=True)
-    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    employee_name = serializers.CharField(
+        source='created_by.get_full_name',
+        read_only=True
+    )
 
     class Meta:
         model = PurchaseOrder
         fields = [
             'id',
-            'po_number',
+            'po_no',              # ✅ correct field
             'quote',
             'vendor',
+            'vendor_email',
             'vendor_name',
-            'employee',
-            'employee_name',
+            'project',
             'status',
+            'issue_date',
+            'sub_total',
             'total_amount',
-            'created_at',
-            'updated_at',
-            'items'
+            'created_by',
+            'employee_name',
+            
+            'items',
         ]
+
 
 class PurchaseOrderCreateSerializer(serializers.Serializer):
     quote_id = serializers.IntegerField()
@@ -522,3 +535,77 @@ class PurchaseOrderCreateSerializer(serializers.Serializer):
             )
 
         return data
+
+
+from rest_framework import serializers
+from finances.models import VendorBill
+
+
+class VendorBillSerializer(serializers.ModelSerializer):
+    vendor_name = serializers.CharField(source='vendor.name', read_only=True)
+    po_no = serializers.CharField(source='purchase_order.po_no', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = VendorBill
+        fields = [
+            'id',
+            'bill_no',
+            'vendor',
+            'vendor_name',
+            'purchase_order',
+            'po_no',
+            'bill_date',
+            'due_date',
+            'total_amount',
+            'paid_amount',
+            'balance_amount',
+            'status',
+            'status_display',
+        ]
+        read_only_fields = [
+            'total_amount',
+            'paid_amount',
+            'balance_amount',
+            'status'
+        ]
+
+
+
+
+from rest_framework import serializers
+from finances.models import OutgoingPayment
+
+
+class OutgoingPaymentSerializer(serializers.ModelSerializer):
+    vendor_name = serializers.CharField(source='vendor.name', read_only=True)
+    bill_no = serializers.CharField(source='vendor_bill.bill_no', read_only=True)
+
+    class Meta:
+        model = OutgoingPayment
+        fields = [
+            'id',
+            'vendor_bill',
+            'bill_no',
+            'vendor',
+            'vendor_name',
+            'payment_date',
+            'amount',
+            'payment_method',
+            'reference_no',
+            'created_at',
+        ]
+        read_only_fields = ['created_at']
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Payment amount must be greater than zero")
+        return value
+class InvoiceItemQuantityOverrideSerializer(serializers.Serializer):
+    """Optional per-invoice quantity override for a quote item"""
+    quote_item_id = serializers.IntegerField()
+    quantity = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal('0.01')
+    )

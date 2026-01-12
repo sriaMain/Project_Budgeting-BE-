@@ -1,6 +1,7 @@
 from celery import shared_task
 from django.core.mail import send_mail
 from django.conf import settings
+from .models import PurchaseOrder
 
 
 @shared_task
@@ -126,4 +127,38 @@ def send_invoice_email(invoice_id):
     # ❌ NO ATTACHMENT
     # email.attach_file(invoice.pdf_file.path)
 
+    email.send()
+
+
+@shared_task
+def send_purchase_order_email(po_id):
+    po = PurchaseOrder.objects.select_related(
+        "vendor",
+        "created_by"
+    ).prefetch_related(
+        "items__quote_item__product_service"
+    ).get(pk=po_id)
+
+    po_link = f"{settings.FRONTEND_BASE_URL}/purchase-orders/{po.id}/"
+
+    html_body = render_to_string(
+        "emails/purchase_order_email.html",
+        {
+            "po": po,
+            "po_link": po_link,
+            "sender_name": "Accounts Team",
+        },
+    )
+
+    email = EmailMultiAlternatives(
+        subject=f"Purchase Order {po.po_no}",
+        body="Please view your purchase order online.",
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[po.vendor.email],
+    )
+
+    # ✅ HTML email only (same as invoice)
+    email.attach_alternative(html_body, "text/html")
+
+    # ❌ NO ATTACHMENT (same as invoice)
     email.send()

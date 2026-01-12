@@ -1,0 +1,33 @@
+<h2>Purchase Order {{ po.po_no }}</h2>
+
+<p>Dear {{ po.vendor.name }},</p>
+
+<p>
+    A new purchase order has been issued.  
+    You can view it online using the link below.
+</p>
+
+<p>
+    <a href="{{ po_link }}">View Purchase Order</a>
+</p>
+
+<table border="1" cellpadding="6" cellspacing="0">
+    <tr>
+        <th>Service</th>
+        <th>Qty</th>
+        <th>Rate</th>
+        <th>Amount</th>
+    </tr>
+    {% for item in po.items.all %}
+    <tr>
+        <td>{{ item.quote_item.product_service.product_service_name }}</td>
+        <td>{{ item.quantity }}</td>
+        <td>{{ item.unit_rate }}</td>
+        <td>{{ item.amount }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<p><strong>Total:</strong> {{ po.total_amount }}</p>
+
+<p>Regards,<br>{{ sender_name }}</p>

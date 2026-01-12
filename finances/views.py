@@ -26,7 +26,7 @@ from django.core.exceptions import ValidationError
 from product_group.models import Quote
 from django.http import Http404
 from django.conf import settings
-from .tasks import send_invoice_email
+from .tasks import send_invoice_email,send_purchase_order_email
 from .utils import validate_invoice_token
 from django.template.loader import render_to_string
 from xhtml2pdf import pisa
@@ -273,6 +273,7 @@ class GenerateInvoiceView(APIView):
         product_service_id = serializer.validated_data.get("product_service_id")
         product_service_ids = serializer.validated_data.get("product_service_ids") or []
         quote_item_ids = serializer.validated_data.get("quote_item_ids") or []
+        invoice_items = serializer.validated_data.get("invoice_items") or []
 
         try:
             invoice = InvoiceService.create_invoice_from_quote(
@@ -285,6 +286,7 @@ class GenerateInvoiceView(APIView):
                 quote_item_ids=quote_item_ids,
                 notes=serializer.validated_data.get("notes", ""),
                 terms_conditions=serializer.validated_data.get("terms_conditions", ""),
+                invoice_items=invoice_items,
             )
 
         except ValidationError as e:
@@ -805,258 +807,6 @@ class ShareInvoiceLinkView(APIView):
         })
 
 
-# # ============================================================================
-# # PURCHASE ORDER VIEWS
-# # ============================================================================
-
-# class PurchaseOrderListView(APIView):
-#     """
-#     List all purchase orders with filters
-    
-#     GET /api/purchase-orders/
-#     Query Params:
-#         - status: filter by status (draft, issued, completed, cancelled)
-#         - vendor_id: filter by vendor
-#         - page: page number
-#         - page_size: items per page
-#     """
-#     permission_classes = [IsAuthenticated]
-#     authentication_classes = [JWTAuthentication]
-    
-#     def get(self, request):
-#         from .models import PurchaseOrder
-        
-#         queryset = PurchaseOrder.objects.select_related(
-#             'vendor', 'quote', 'project', 'created_by'
-#         ).prefetch_related('items')
-        
-#         # Apply filters
-#         status_filter = request.query_params.get('status')
-#         vendor_id = request.query_params.get('vendor_id')
-        
-#         if status_filter:
-#             queryset = queryset.filter(status=status_filter)
-        
-#         if vendor_id:
-#             queryset = queryset.filter(vendor_id=vendor_id)
-        
-#         # Pagination
-#         page = int(request.query_params.get('page', 1))
-#         page_size = int(request.query_params.get('page_size', 20))
-        
-#         start = (page - 1) * page_size
-#         end = start + page_size
-        
-#         total_count = queryset.count()
-#         purchase_orders = queryset.order_by('-issue_date')[start:end]
-        
-#         from .serializers import PurchaseOrderSerializer
-#         serializer = PurchaseOrderSerializer(purchase_orders, many=True)
-        
-#         return Response({
-#             'count': total_count,
-#             'page': page,
-#             'page_size': page_size,
-#             'total_pages': (total_count + page_size - 1) // page_size,
-#             'results': serializer.data
-#         }, status=status.HTTP_200_OK)
-
-
-# class PurchaseOrderDetailView(APIView):
-#     """
-#     Get, update, or delete a purchase order
-    
-#     GET /api/purchase-orders/<po_id>/
-#     PUT /api/purchase-orders/<po_id>/
-#     DELETE /api/purchase-orders/<po_id>/
-#     """
-#     permission_classes = [IsAuthenticated]
-#     authentication_classes = [JWTAuthentication]
-    
-#     def get(self, request, po_id):
-#         from .models import PurchaseOrder
-#         from .serializers import PurchaseOrderSerializer
-        
-#         po = get_object_or_404(PurchaseOrder, id=po_id)
-#         serializer = PurchaseOrderSerializer(po)
-#         return Response(serializer.data, status=status.HTTP_200_OK)
-    
-#     def put(self, request, po_id):
-#         from .models import PurchaseOrder
-#         from .serializers import PurchaseOrderSerializer
-        
-#         po = get_object_or_404(PurchaseOrder, id=po_id)
-        
-#         if po.status != 'draft':
-#             return Response(
-#                 {"error": "Only draft POs can be edited"},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-        
-#         serializer = PurchaseOrderSerializer(po, data=request.data, partial=True)
-#         if serializer.is_valid():
-#             serializer.save()
-#             return Response(serializer.data, status=status.HTTP_200_OK)
-        
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-#     def delete(self, request, po_id):
-#         from .models import PurchaseOrder
-        
-#         po = get_object_or_404(PurchaseOrder, id=po_id)
-        
-#         if po.status != 'draft':
-#             return Response(
-#                 {"error": "Only draft POs can be deleted"},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-        
-#         po.delete()
-#         return Response(
-#             {"message": "Purchase order deleted successfully"},
-#             status=status.HTTP_204_NO_CONTENT
-#         )
-
-
-# class CreatePurchaseOrderView(APIView):
-#     """
-#     Create a new purchase order from a quote
-    
-#     POST /api/purchase-orders/create/
-#     {
-#         "quote_id": 47,
-#         "vendor_id": 2,
-#         "project_id": 22,
-#         "quote_item_ids": [67, 68]
-#     }
-#     """
-#     permission_classes = [IsAuthenticated]
-#     authentication_classes = [JWTAuthentication]
-    
-#     @transaction.atomic
-#     def post(self, request):
-#         from .models import PurchaseOrder, PurchaseOrderItem
-#         from product_group.models import Quote
-        
-#         quote_id = request.data.get('quote_id')
-#         vendor_id = request.data.get('vendor_id')
-#         project_id = request.data.get('project_id')
-#         quote_item_ids = request.data.get('quote_item_ids', [])
-        
-#         if not all([quote_id, vendor_id, project_id]):
-#             return Response(
-#                 {"error": "quote_id, vendor_id, and project_id are required"},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-        
-#         try:
-#             quote = Quote.objects.get(quote_no=quote_id)
-#             vendor = Vendor.objects.get(id=vendor_id)
-#             project = Project.objects.get(id=project_id)
-#         except (Quote.DoesNotExist, Vendor.DoesNotExist, Project.DoesNotExist) as e:
-#             return Response(
-#                 {"error": f"Invalid reference: {str(e)}"},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-        
-#         # Get quote items
-#         quote_items = quote.items.all()
-#         if quote_item_ids:
-#             quote_items = quote_items.filter(id__in=quote_item_ids)
-        
-#         if not quote_items.exists():
-#             return Response(
-#                 {"error": "No quote items found for PO"},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-        
-#         # Generate PO number
-#         from datetime import datetime
-#         po_no = f"PO-{datetime.now().strftime('%Y%m')}-{PurchaseOrder.objects.count() + 1:04d}"
-        
-#         # Create PO
-#         po = PurchaseOrder.objects.create(
-#             po_no=po_no,
-#             vendor=vendor,
-#             quote=quote,
-#             project=project,
-#             status='draft',
-#             created_by=request.user
-#         )
-        
-#         # Create PO items
-#         for item in quote_items:
-#             PurchaseOrderItem.objects.create(
-#                 purchase_order=po,
-#                 quote_item=item,
-#                 description=item.description,
-#                 quantity=item.quantity,
-#                 unit_rate=item.price_per_unit
-#             )
-        
-#         from .serializers import PurchaseOrderSerializer
-#         serializer = PurchaseOrderSerializer(po)
-        
-#         return Response(
-#             {
-#                 "message": f"Purchase order {po.po_no} created successfully",
-#                 "purchase_order": serializer.data
-#             },
-#             status=status.HTTP_201_CREATED
-#         )
-
-
-# class VendorBillListView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def get(self, request):
-#         bills = VendorBill.objects.select_related('vendor', 'purchase_order')
-#         serializer = VendorBillSerializer(bills, many=True)
-#         return Response(serializer.data)
-# class CreateVendorBillView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def post(self, request):
-#         po = get_object_or_404(PurchaseOrder, id=request.data['purchase_order_id'])
-
-#         bill = VendorBill.objects.create(
-#             bill_no=request.data['bill_no'],
-#             vendor=po.vendor,
-#             purchase_order=po,
-#             bill_date=request.data['bill_date'],
-#             due_date=request.data['due_date'],
-#         )
-
-#         serializer = VendorBillSerializer(bill)
-#         return Response(
-#             {
-#                 "message": "Vendor bill created",
-#                 "bill": serializer.data
-#             },
-#             status=201
-#         )
-
-
-# class RecordOutgoingPaymentView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def post(self, request, bill_id):
-#         bill = get_object_or_404(VendorBill, id=bill_id)
-
-#         serializer = OutgoingPaymentSerializer(data=request.data)
-#         if serializer.is_valid():
-#             serializer.save(
-#                 vendor_bill=bill,
-#                 vendor=bill.vendor
-#             )
-#             return Response(
-#                 {"message": "Payment recorded successfully"},
-#                 status=201
-#             )
-#         return Response(serializer.errors, status=400)
-
-
-
 class ProjectPaymentAPIView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
@@ -1360,22 +1110,67 @@ class PurchaseOrderCreateAPIView(APIView):
             },
             status=status.HTTP_201_CREATED
         )
+class ProjectPurchaseOrderListAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
+    def get(self, request, project_no):
+        project = get_object_or_404(Project, project_no=project_no)
+
+        purchase_orders = (
+            PurchaseOrder.objects
+            .filter(project=project)
+            .select_related("vendor", "quote", "created_by")
+            .prefetch_related("items")
+            .order_by("-issue_date")
+        )
+
+        return Response({
+            "project_no": project.project_no,
+            "project_name": project.project_name,
+            "count": purchase_orders.count(),
+            "purchase_orders": [
+                {
+                    "po_id": po.id,
+                    "po_no": po.po_no,
+                    "vendor_name": po.vendor.name,
+                    "status": po.status,
+                    "total_amount": po.total_amount,
+                    "items_count": po.items.count(),
+                    "issue_date": po.issue_date
+                }
+                for po in purchase_orders
+            ]
+        })
 
 
 
 class QuotePurchaseOrderListAPIView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    # def get(self, request, quote_id):
+    #     purchase_orders = PurchaseOrder.objects.filter(
+    #         quote_id=quote_id
+    #     ).prefetch_related('items')
+
+    #     serializer = PurchaseOrderSerializer(purchase_orders, many=True)
+        # return Response(serializer.data)
 
     def get(self, request, quote_id):
-        purchase_orders = PurchaseOrder.objects.filter(
-            quote_id=quote_id
-        ).prefetch_related('items')
+        purchase_orders = (
+            PurchaseOrder.objects
+            .filter(quote_id=quote_id)
+            .select_related('vendor', 'created_by', 'project')
+            .prefetch_related('items') 
+        )
 
         serializer = PurchaseOrderSerializer(purchase_orders, many=True)
         return Response(serializer.data)
+
 class PurchaseOrderDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
     def get(self, request, po_id):
         po = get_object_or_404(PurchaseOrder, id=po_id)
@@ -1383,6 +1178,7 @@ class PurchaseOrderDetailAPIView(APIView):
         return Response(serializer.data)
 class PurchaseOrderStatusUpdateAPIView(APIView):
     permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
     def patch(self, request, po_id):
         po = get_object_or_404(PurchaseOrder, id=po_id)
@@ -1401,3 +1197,268 @@ class PurchaseOrderStatusUpdateAPIView(APIView):
             "message": "Status updated",
             "status": po.status
         })
+
+
+from django.shortcuts import get_object_or_404
+
+
+from finances.models import VendorBill, PurchaseOrder
+
+
+class VendorBillCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    @transaction.atomic
+    def post(self, request):
+        purchase_order_id = request.data.get("purchase_order_id")
+
+        if not purchase_order_id:
+            return Response(
+                {"detail": "purchase_order_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        po = get_object_or_404(PurchaseOrder, id=purchase_order_id)
+
+        if VendorBill.objects.filter(purchase_order=po).exists():
+            return Response(
+                {"detail": "Vendor bill already exists for this purchase order"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        bill = VendorBill.objects.create(
+            bill_no=f"BILL-{po.po_no}",
+            vendor=po.vendor,
+            purchase_order=po,
+            bill_date=timezone.now().date(),
+            due_date=timezone.now().date() + timezone.timedelta(days=30),
+        )
+
+        return Response(
+            {
+                "message": "Vendor bill created successfully",
+                "bill_id": bill.id,
+                "bill_no": bill.bill_no,
+                "total_amount": bill.total_amount,
+                "status": bill.status
+            },
+            status=status.HTTP_201_CREATED
+        )
+    
+
+
+from finances.models import VendorBill
+
+
+class VendorBillListAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request):
+        qs = VendorBill.objects.select_related(
+            'vendor', 'purchase_order'
+        ).order_by('-bill_date')
+
+        vendor_id = request.query_params.get("vendor_id")
+        status_ = request.query_params.get("status")
+
+        if vendor_id:
+            qs = qs.filter(vendor_id=vendor_id)
+
+        if status_:
+            qs = qs.filter(status=status_)
+
+        data = [
+            {
+                "id": bill.id,
+                "bill_no": bill.bill_no,
+                "vendor": bill.vendor.name,
+                "po_no": bill.purchase_order.po_no,
+                "total_amount": bill.total_amount,
+                "paid_amount": bill.paid_amount,
+                "balance_amount": bill.balance_amount,
+                "status": bill.status,
+                "bill_date": bill.bill_date,
+                "due_date": bill.due_date,
+            }
+            for bill in qs
+        ]
+
+        return Response(data)
+    
+class VendorBillByNumberAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request, bill_no):
+        bill = get_object_or_404(
+            VendorBill.objects.select_related("vendor", "purchase_order"),
+            bill_no=bill_no
+        )
+
+        data = {
+            "id": bill.id,
+            "bill_no": bill.bill_no,
+            "vendor": {
+                "id": bill.vendor.id,
+                "name": bill.vendor.name,
+            },
+            "purchase_order": {
+                "id": bill.purchase_order.id,
+                "po_no": bill.purchase_order.po_no,
+            } if bill.purchase_order else None,
+            "total_amount": bill.total_amount,
+            "paid_amount": bill.paid_amount,
+            "balance_amount": bill.balance_amount,
+            "status": bill.status,
+            "bill_date": bill.bill_date,
+            "due_date": bill.due_date,
+        }
+
+        return Response(data)
+
+
+
+from finances.models import VendorBill, OutgoingPayment
+
+
+class OutgoingPaymentCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    @transaction.atomic
+    def post(self, request, bill_id):
+        bill = get_object_or_404(VendorBill, id=bill_id)
+
+        amount = request.data.get("amount")
+        payment_date = request.data.get("payment_date")
+        payment_method = request.data.get("payment_method")
+        reference_no = request.data.get("reference_no", "")
+
+        if not amount or not payment_date or not payment_method:
+            return Response(
+                {"detail": "amount, payment_date and payment_method are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if float(amount) <= 0:
+            return Response(
+                {"detail": "Payment amount must be greater than zero"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if float(amount) > float(bill.balance_amount):
+            return Response(
+                {"detail": "Payment exceeds bill balance"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        payment = OutgoingPayment.objects.create(
+            vendor_bill=bill,
+            vendor=bill.vendor,
+            payment_date=payment_date,
+            amount=amount,
+            payment_method=payment_method,
+            reference_no=reference_no
+        )
+
+        return Response(
+            {
+                "message": "Payment recorded successfully",
+                "payment_id": payment.id,
+                "bill_no": bill.bill_no,
+                "paid_amount": payment.amount,
+                "remaining_balance": bill.balance_amount
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+
+from finances.models import OutgoingPayment
+
+
+class VendorBillPaymentListAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request, bill_id):
+        payments = OutgoingPayment.objects.filter(
+            vendor_bill_id=bill_id
+        ).select_related('vendor', 'vendor_bill').order_by('-payment_date')
+
+        data = [
+            {
+                "id": p.id,
+                "bill_no": p.vendor_bill.bill_no,
+                "vendor": p.vendor.name,
+                "amount": p.amount,
+                "payment_method": p.payment_method,
+                "reference_no": p.reference_no,
+                "payment_date": p.payment_date,
+                "created_at": p.created_at,
+            }
+            for p in payments
+        ]
+
+        return Response(data)
+
+from finances.models import OutgoingPayment
+
+
+class ProjectOutgoingPaymentsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request, project_id):
+        project = get_object_or_404(Project, project_no=project_id)
+
+        payments = OutgoingPayment.objects.filter(
+            vendor_bill__purchase_order__project=project
+        ).select_related(
+            'vendor', 'vendor_bill', 'vendor_bill__purchase_order'
+        )
+
+        total_paid = payments.aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+
+        data = {
+            "project_no": project.project_no,
+            "project_name": project.project_name,
+            "total_paid": total_paid,
+            "payments": [
+                {
+                    "bill_no": p.vendor_bill.bill_no,
+                    "po_no": p.vendor_bill.purchase_order.po_no,
+                    "vendor": p.vendor.name,
+                    "amount": p.amount,
+                    "payment_method": p.payment_method,
+                    "payment_date": p.payment_date,
+                }
+                for p in payments
+            ]
+        }
+
+        return Response(data)
+
+
+class SendPurchaseOrderEmailView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def post(self, request, po_id):
+        po = get_object_or_404(PurchaseOrder, pk=po_id)
+
+        if not po.vendor.email:
+            return Response(
+                {"error": "Vendor email not found"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        send_purchase_order_email.delay(po.id)
+
+        return Response(
+            {"message": "Purchase Order email sent successfully"},
+            status=status.HTTP_200_OK
+        )

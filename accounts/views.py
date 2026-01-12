@@ -449,3 +449,31 @@ class VendorListCreateView(APIView):
             serializer.save()
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
+    
+    def put(self, request, pk):
+        vendor = get_object_or_404(Vendor, pk=pk)
+        serializer = VendorSerializer(vendor, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=400)  
+
+
+
+class VendorChoicesAPIView(APIView):
+    """
+    Returns static vendor-related choices.
+    Useful for dropdowns and form builders.
+    """
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request):
+        vendor_types = [
+            {"value": key, "label": label}
+            for key, label in Vendor.VENDOR_TYPE_CHOICES
+        ]
+
+        return Response({
+            "vendor_types": vendor_types
+        })
