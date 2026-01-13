@@ -19,7 +19,7 @@ from .serializers import (
     InvoiceListSerializer, InvoiceDetailSerializer, InvoiceItemSerializer,
     InvoicePaymentSerializer,
     GenerateInvoiceSerializer, RecordPaymentSerializer,
-    SendInvoiceEmailSerializer, CancelInvoiceSerializer, InvoiceStatsSerializer, PurchaseOrderSerializer,
+    SendInvoiceEmailSerializer, CancelInvoiceSerializer, InvoiceStatsSerializer, PurchaseOrderSerializer,ProjectAttachmentSerializer
 )
 from .services import InvoiceService
 from django.core.exceptions import ValidationError
@@ -31,6 +31,11 @@ from .utils import validate_invoice_token
 from django.template.loader import render_to_string
 from xhtml2pdf import pisa
 from Project.models import Project
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+from decimal import Decimal
+from .models import Invoice, InvoicePayment, ProjectAttachment
+
 
 class QuotationDetailView(APIView):
     """
@@ -201,54 +206,6 @@ class InvoiceDetailView(APIView):
         )
         
 
-# class GenerateInvoiceView(APIView):
-#     permission_classes = [IsAuthenticated]
-#     authentication_classes = [JWTAuthentication]
-
-#     @transaction.atomic
-#     def post(self, request):
-#         serializer = GenerateInvoiceSerializer(data=request.data)
-
-#         if not serializer.is_valid():
-#             return Response(
-#                 serializer.errors,
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
-#         quote = get_object_or_404(
-#             Quote,
-#             pk=serializer.validated_data["quote_id"]
-#         )
-
-#         try:
-#             invoice = InvoiceService.create_invoice_from_quote(
-#                 quote=quote,
-#                 user=request.user,
-#                 due_days=serializer.validated_data["due_days"],
-#                 product_service_id=serializer.validated_data.get("product_service_id"),
-#                 product_service_ids=serializer.validated_data.get("product_service_ids"),
-#                 product_group_id=serializer.validated_data.get("product_group_id"),
-#                 notes=serializer.validated_data.get("notes", ""),
-#                 terms_conditions=serializer.validated_data.get(
-#                     "terms_conditions", ""
-#                 ),
-#             )
-
-#         except ValidationError as e:
-#             return Response(
-#                 {"error": str(e)},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
-#         response_serializer = InvoiceDetailSerializer(invoice)
-
-#         return Response(
-#             {
-#                 "message": f"Invoice {invoice.invoice_no} generated successfully",
-#                 "invoice": response_serializer.data,
-#             },
-#             status=status.HTTP_201_CREATED
-#         )
 class GenerateInvoiceView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
@@ -1461,4 +1418,121 @@ class SendPurchaseOrderEmailView(APIView):
         return Response(
             {"message": "Purchase Order email sent successfully"},
             status=status.HTTP_200_OK
+        )
+
+
+class ProjectAttachmentView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    def post(self, request, project_id):
+        # Extract file separately to avoid deepcopy pickle errors
+        uploaded_file = request.FILES.get("file")
+        if not uploaded_file:
+            return Response(
+                {"file": ["This field is required."]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Build clean data without file
+        data = {
+            "project": project_id,
+            "category": request.POST.get("category", ""),
+        }
+
+        # Create serializer with file and data separately
+        serializer = ProjectAttachmentSerializer(
+            data=data,
+            context={"user": request.user, "file": uploaded_file}
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                serializer.data,
+                status=status.HTTP_201_CREATED
+            )
+
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    def get(self, request, project_id=None, attachment_id=None):
+        # If attachment_id is provided, fetch single attachment
+        if attachment_id:
+            attachment = get_object_or_404(ProjectAttachment, id=attachment_id)
+            serializer = ProjectAttachmentSerializer(attachment, context={'request': request})
+            return Response(serializer.data)
+        
+        # Otherwise fetch by project_id
+        if not project_id:
+            return Response(
+                {"error": "Either project_id or attachment_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        category = request.GET.get("category")
+
+        attachments = ProjectAttachment.objects.filter(
+            project_id=project_id
+        )
+
+        if category:
+            attachments = attachments.filter(category=category)
+
+        serializer = ProjectAttachmentSerializer(attachments, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    def download(self, request, attachment_id):
+        """Download an attachment file"""
+        attachment = get_object_or_404(ProjectAttachment, id=attachment_id)
+        
+        if not attachment.file:
+            return Response(
+                {"error": "File not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        return FileResponse(
+            attachment.file.open('rb'),
+            as_attachment=True,
+            filename=attachment.file_name,
+            content_type=attachment.file_type
+        )
+
+
+
+
+
+    def delete(self, request, attachment_id):
+        attachment = get_object_or_404(
+            ProjectAttachment,
+            id=attachment_id
+        )
+
+        attachment.delete()
+        return Response(
+            {"message": "Attachment deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT
+        )
+
+class DownloadAttachmentView(APIView):
+    """Download attachment file"""
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request, attachment_id):
+        attachment = get_object_or_404(ProjectAttachment, id=attachment_id)
+        
+        if not attachment.file:
+            return Response(
+                {"error": "File not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        return FileResponse(
+            attachment.file.open('rb'),
+            as_attachment=True,
+            filename=attachment.file_name,
+            content_type=attachment.file_type
         )

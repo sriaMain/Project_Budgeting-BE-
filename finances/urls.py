@@ -3,7 +3,7 @@ from django.urls import path
 from . import views
 from django.http import HttpResponse
 
-from .views import (QuotationDetailView, InvoiceListView, InvoiceDetailView,
+from .views import (DownloadAttachmentView, ProjectAttachmentView, QuotationDetailView, InvoiceListView, InvoiceDetailView,
                     GenerateInvoiceView, RecordPaymentView, InvoicePaymentListView,  
                     DownloadInvoicePDFView, SendInvoiceEmailView, CancelInvoiceView,
                     InvoiceShareableLinkView, PublicInvoiceView, InvoiceStatisticsView, DownloadInvoicePDFView,PublicInvoicePDFView,ShareInvoiceLinkView,
@@ -50,4 +50,7 @@ path("vendor-bills/<int:bill_id>/payments/", OutgoingPaymentCreateAPIView.as_vie
 path("vendor-bills/<int:bill_id>/payments/list/", VendorBillPaymentListAPIView.as_view()),
 
 path("projects/<int:project_id>/outgoing-payments/", ProjectOutgoingPaymentsAPIView.as_view()),
+path("projects/<int:project_id>/attachments/",ProjectAttachmentView.as_view(),name="project-attachments",),
+path("attachments/<int:attachment_id>/",ProjectAttachmentView.as_view(),name="delete-attachment",),
+path("attachments/<int:attachment_id>/download/",DownloadAttachmentView.as_view(),name="download-attachment",),
 ]

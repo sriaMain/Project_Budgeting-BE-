@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.utils import timezone
 from django.core.exceptions import ValidationError as DjangoValidationError
 from datetime import datetime, date
-from .models import Invoice, InvoiceItem, InvoicePayment
+from .models import Invoice, InvoiceItem, InvoicePayment, ProjectAttachment
 from Project.models import Project
 
 
@@ -609,3 +609,53 @@ class InvoiceItemQuantityOverrideSerializer(serializers.Serializer):
         decimal_places=2,
         min_value=Decimal('0.01')
     )
+
+
+class ProjectAttachmentSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    uploaded_by_name = serializers.StringRelatedField(source='uploaded_by', read_only=True)
+
+    class Meta:
+        model = ProjectAttachment
+        fields = [
+            "id",
+            "project",
+            "file_name",
+            "file_size",
+            "file_type",
+            "category",
+            "uploaded_by",
+            "uploaded_by_name",
+            "uploaded_at",
+            "file_url",
+        ]
+        read_only_fields = [
+            "file_name",
+            "file_size",
+            "file_type",
+            "uploaded_by",
+            "uploaded_at",
+            "file_url",
+        ]
+
+    def get_file_url(self, obj):
+        if obj.file:
+            # Cloudinary URLs are already absolute, just return the URL
+            return obj.file.url
+        return None
+
+    def create(self, validated_data):
+        # Get file from context (passed by view to avoid pickle issues)
+        uploaded_file = self.context.get("file")
+        if not uploaded_file:
+            raise serializers.ValidationError({"file": "No file was provided in context."})
+
+        user = self.context.get("user")
+
+        validated_data["file"] = uploaded_file
+        validated_data["file_name"] = uploaded_file.name
+        validated_data["file_size"] = uploaded_file.size
+        validated_data["file_type"] = uploaded_file.content_type
+        validated_data["uploaded_by"] = user
+
+        return super().create(validated_data)

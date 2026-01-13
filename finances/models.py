@@ -412,3 +412,44 @@ class OutgoingPayment(models.Model):
         bill = VendorBill.objects.get(id=self.vendor_bill_id)
         bill.update_status()
         bill.save()
+
+from cloudinary.models import CloudinaryField
+class ProjectAttachment(models.Model):
+
+    CATEGORY_CHOICES = (
+        ("contract", "Contract"),
+        ("quote", "Quote"),
+        ("invoice", "Invoice"),
+        ("bill", "Bill"),
+        ("design", "Design"),
+        ("other", "Other"),
+    )
+
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="attachments"
+    )
+
+    file = CloudinaryField('attachment', folder='project_attachments')
+    file_name = models.CharField(max_length=255)
+    file_size = models.PositiveIntegerField()
+    file_type = models.CharField(max_length=100)
+
+    category = models.CharField(
+        max_length=30,
+        choices=CATEGORY_CHOICES,
+        default="other"
+    )
+
+    uploaded_by = models.ForeignKey(
+        "accounts.Account",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.file_name} ({self.project_id})"
