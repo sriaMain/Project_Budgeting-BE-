@@ -44,8 +44,8 @@ path("projects/<int:project_no>/purchase-orders/", ProjectPurchaseOrderListAPIVi
 path("quotes/<int:quote_id>/purchase-orders/", QuotePurchaseOrderListAPIView.as_view()),
 
 path("vendor-bills/", VendorBillCreateAPIView.as_view()),
-path("vendor-bills/<str:bill_no>/",VendorBillByNumberAPIView.as_view(),name="vendor-bill-by-number"),
 path("vendor-bills/list/", VendorBillListAPIView.as_view()),
+path("vendor-bills/<str:bill_no>/",VendorBillByNumberAPIView.as_view(),name="vendor-bill-by-number"),
 path("vendor-bills/<int:bill_id>/payments/", OutgoingPaymentCreateAPIView.as_view()),
 path("vendor-bills/<int:bill_id>/payments/list/", VendorBillPaymentListAPIView.as_view()),
 

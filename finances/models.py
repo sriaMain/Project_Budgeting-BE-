@@ -398,6 +398,10 @@ class OutgoingPayment(models.Model):
 
     @transaction.atomic
     def save(self, *args, **kwargs):
+        # Ensure amount is Decimal
+        if not isinstance(self.amount, Decimal):
+            self.amount = Decimal(str(self.amount))
+        
         if self.amount > self.vendor_bill.balance_amount:
             raise ValidationError("Payment exceeds bill balance")
 
@@ -431,7 +435,7 @@ class ProjectAttachment(models.Model):
         related_name="attachments"
     )
 
-    file = CloudinaryField('attachment', folder='project_attachments')
+    file = CloudinaryField('attachment', folder='project_attachments', resource_type='auto')
     file_name = models.CharField(max_length=255)
     file_size = models.PositiveIntegerField()
     file_type = models.CharField(max_length=100)

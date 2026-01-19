@@ -389,7 +389,6 @@ class QuoteDetailSerializer(serializers.ModelSerializer):
 	class Meta:
 		model = Quote
 		fields = [
-			'id',
 			'quote_no',
 			'quote_name',
 			'date_of_issue',

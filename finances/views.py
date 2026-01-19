@@ -980,19 +980,19 @@ class PurchaseOrderCreateAPIView(APIView):
 
         if not quote_no:
             return Response(
-                {"detail": "quote_no is required"},
+                {"error": "quote_no is required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         if not vendor_id:
             return Response(
-                {"detail": "vendor_id is required"},
+                {"error": "vendor_id is required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         if not items:
             return Response(
-                {"detail": "At least one item is required"},
+                {"error": "At least one item is required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -1023,7 +1023,7 @@ class PurchaseOrderCreateAPIView(APIView):
 
             if not quote_item_id or not quantity:
                 return Response(
-                    {"detail": "quote_item_id and quantity are required"},
+                    {"error": "quote_item_id and quantity are required"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -1172,7 +1172,7 @@ class VendorBillCreateAPIView(APIView):
 
         if not purchase_order_id:
             return Response(
-                {"detail": "purchase_order_id is required"},
+                {"error": "purchase_order_id is required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -1180,7 +1180,7 @@ class VendorBillCreateAPIView(APIView):
 
         if VendorBill.objects.filter(purchase_order=po).exists():
             return Response(
-                {"detail": "Vendor bill already exists for this purchase order"},
+                {"error": "Vendor bill already exists for this purchase order"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -1214,35 +1214,45 @@ class VendorBillListAPIView(APIView):
 
     def get(self, request):
         qs = VendorBill.objects.select_related(
-            'vendor', 'purchase_order'
+            'vendor', 'purchase_order', 'purchase_order__project'
         ).order_by('-bill_date')
 
         vendor_id = request.query_params.get("vendor_id")
         status_ = request.query_params.get("status")
+        project_id = request.query_params.get("project_id")
 
         if vendor_id:
             qs = qs.filter(vendor_id=vendor_id)
 
         if status_:
             qs = qs.filter(status=status_)
+            
+        if project_id:
+            qs = qs.filter(purchase_order__project__project_no=project_id)
 
         data = [
             {
                 "id": bill.id,
                 "bill_no": bill.bill_no,
                 "vendor": bill.vendor.name,
+                "vendor_id": bill.vendor.id,
                 "po_no": bill.purchase_order.po_no,
-                "total_amount": bill.total_amount,
-                "paid_amount": bill.paid_amount,
-                "balance_amount": bill.balance_amount,
+                "project_no": bill.purchase_order.project.project_no,
+                "project_name": bill.purchase_order.project.project_name,
+                "total_amount": float(bill.total_amount),
+                "paid_amount": float(bill.paid_amount),
+                "balance_amount": float(bill.balance_amount),
                 "status": bill.status,
-                "bill_date": bill.bill_date,
-                "due_date": bill.due_date,
+                "bill_date": str(bill.bill_date),
+                "due_date": str(bill.due_date),
             }
             for bill in qs
         ]
 
-        return Response(data)
+        return Response({
+            "count": len(data),
+            "bills": data
+        })
     
 class VendorBillByNumberAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1295,19 +1305,19 @@ class OutgoingPaymentCreateAPIView(APIView):
 
         if not amount or not payment_date or not payment_method:
             return Response(
-                {"detail": "amount, payment_date and payment_method are required"},
+                {"error": "amount, payment_date and payment_method are required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         if float(amount) <= 0:
             return Response(
-                {"detail": "Payment amount must be greater than zero"},
+                {"error": "Payment amount must be greater than zero"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         if float(amount) > float(bill.balance_amount):
             return Response(
-                {"detail": "Payment exceeds bill balance"},
+                {"error": "Payment exceeds bill balance"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -1340,6 +1350,9 @@ class VendorBillPaymentListAPIView(APIView):
     authentication_classes = [JWTAuthentication]
 
     def get(self, request, bill_id):
+        # ✅ Validate bill exists
+        bill = get_object_or_404(VendorBill, id=bill_id)
+        
         payments = OutgoingPayment.objects.filter(
             vendor_bill_id=bill_id
         ).select_related('vendor', 'vendor_bill').order_by('-payment_date')
@@ -1358,7 +1371,16 @@ class VendorBillPaymentListAPIView(APIView):
             for p in payments
         ]
 
-        return Response(data)
+        return Response({
+            "bill_id": bill.id,
+            "bill_no": bill.bill_no,
+            "vendor": bill.vendor.name,
+            "total_amount": bill.total_amount,
+            "paid_amount": bill.paid_amount,
+            "remaining_amount": bill.balance_amount,
+            "count": len(data),
+            "payments": data
+        })
 
 from finances.models import OutgoingPayment
 
@@ -1368,13 +1390,21 @@ class ProjectOutgoingPaymentsAPIView(APIView):
     authentication_classes = [JWTAuthentication]
 
     def get(self, request, project_id):
+        # ✅ Project uses project_no as primary key
         project = get_object_or_404(Project, project_no=project_id)
 
+        # 🔍 DEBUG: Check what POs exist for this project
+        pos = PurchaseOrder.objects.filter(project=project)
+        
+        # 🔍 DEBUG: Check what bills exist for those POs
+        bills = VendorBill.objects.filter(purchase_order__in=pos)
+        
+        # 🔍 Get payments
         payments = OutgoingPayment.objects.filter(
-            vendor_bill__purchase_order__project=project
+            vendor_bill__in=bills
         ).select_related(
             'vendor', 'vendor_bill', 'vendor_bill__purchase_order'
-        )
+        ).order_by('-payment_date')
 
         total_paid = payments.aggregate(
             total=Sum('amount')
@@ -1383,15 +1413,23 @@ class ProjectOutgoingPaymentsAPIView(APIView):
         data = {
             "project_no": project.project_no,
             "project_name": project.project_name,
-            "total_paid": total_paid,
+            "debug": {
+                "purchase_order_count": pos.count(),
+                "vendor_bill_count": bills.count(),
+            },
+            "total_paid": float(total_paid),
+            "payment_count": payments.count(),
             "payments": [
                 {
+                    "id": p.id,
                     "bill_no": p.vendor_bill.bill_no,
                     "po_no": p.vendor_bill.purchase_order.po_no,
                     "vendor": p.vendor.name,
-                    "amount": p.amount,
+                    "amount": float(p.amount),
                     "payment_method": p.payment_method,
-                    "payment_date": p.payment_date,
+                    "reference_no": p.reference_no,
+                    "payment_date": str(p.payment_date),
+                    "created_at": str(p.created_at),
                 }
                 for p in payments
             ]
