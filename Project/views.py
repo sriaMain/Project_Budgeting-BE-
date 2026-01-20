@@ -17,7 +17,7 @@ from django.db.models import F
 from django.shortcuts import get_object_or_404
 from .tasks import send_task_assignment_email
 from .utils import format_seconds
-
+from django.db.models import Q
 from datetime import timedelta, datetime
 
 

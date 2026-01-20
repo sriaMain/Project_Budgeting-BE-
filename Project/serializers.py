@@ -109,9 +109,12 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
         return project
 
 from finances.serializers import InvoiceListSerializer
+from client.serializers import PointOfContactSerializer
+
 class ProjectListSerializer(serializers.ModelSerializer):
     budget = serializers.SerializerMethodField()
     invoices = serializers.SerializerMethodField()
+    contacts = serializers.SerializerMethodField()
     company_name = serializers.CharField(
         source='client.company_name',
         read_only=True
@@ -129,6 +132,7 @@ class ProjectListSerializer(serializers.ModelSerializer):
             'invoices',
             'company_name',
             'created_from_quotation',
+            'contacts',
         )
 
     def get_budget(self, obj):
@@ -136,6 +140,7 @@ class ProjectListSerializer(serializers.ModelSerializer):
             return ProjectBudgetSerializer(obj.budget).data
         except ObjectDoesNotExist:
             return None
+    
     def get_invoices(self, obj):
         invoices = obj.invoice_set.all()  # ✅ CORRECT
 
@@ -143,6 +148,14 @@ class ProjectListSerializer(serializers.ModelSerializer):
             return []
 
         return InvoiceListSerializer(invoices, many=True).data
+    
+    def get_contacts(self, obj):
+        """Get all POCs (contacts) for the project's client company"""
+        if not obj.client:
+            return []
+        
+        pocs = obj.client.pocs.all()
+        return PointOfContactSerializer(pocs, many=True).data
     
 
 class TaskSerializer(serializers.ModelSerializer):

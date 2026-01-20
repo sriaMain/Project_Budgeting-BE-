@@ -867,10 +867,10 @@ class ProjectPaymentsListAPIView(APIView):
         # Get all invoices for this project
         invoices = project.invoice_set.all()
         
-        # Get all payments for those invoices
+        # Get all INCOMING payments for those invoices
         payments = InvoicePayment.objects.filter(
             invoice__in=invoices
-        ).select_related('created_by', 'invoice').order_by('-payment_date')
+        ).select_related('created_by', 'invoice').order_by('-payment_date', '-created_at', '-id')
         
         # Build payment data
         payment_data = []
@@ -888,17 +888,50 @@ class ProjectPaymentsListAPIView(APIView):
                 'created_at': payment.created_at
             })
         
-        # Calculate totals
+        # Calculate INCOMING totals
         total_payments = sum(float(p['amount']) for p in payment_data)
-        
+
+        # Get all OUTGOING payments tied to this project's purchase orders/vendor bills
+        pos = PurchaseOrder.objects.filter(project=project)
+        bills = VendorBill.objects.filter(purchase_order__in=pos)
+        outgoing_qs = OutgoingPayment.objects.filter(
+            vendor_bill__in=bills
+        ).select_related(
+            'vendor', 'vendor_bill', 'vendor_bill__purchase_order'
+        ).order_by('-payment_date', '-created_at', '-id')
+
+        outgoing_payments = [
+            {
+                'id': op.id,
+                'bill_id': op.vendor_bill.id,
+                'bill_no': op.vendor_bill.bill_no,
+                'po_id': op.vendor_bill.purchase_order.id,
+                'po_no': op.vendor_bill.purchase_order.po_no,
+                'vendor': op.vendor.name,
+                'payment_date': str(op.payment_date),
+                'amount': str(op.amount),
+                'payment_method': op.get_payment_method_display(),
+                'reference_no': op.reference_no,
+                'created_at': str(op.created_at),
+            }
+            for op in outgoing_qs
+        ]
+
+        outgoing_total = sum(float(item['amount']) for item in outgoing_payments)
+
         return Response({
             'project_no': project.project_no,
             'project_name': project.project_name,
             'invoice_count': invoices.count(),
             'total_invoiced': str(invoices.aggregate(Sum('total_amount'))['total_amount__sum'] or 0),
+            # Backwards compatible fields for incoming payments
             'total_payments': str(total_payments),
             'payment_count': len(payment_data),
-            'payments': payment_data
+            'payments': payment_data,
+            # New fields including outgoing payments
+            'outgoing_total_payments': str(outgoing_total),
+            'outgoing_payment_count': len(outgoing_payments),
+            'outgoing_payments': outgoing_payments,
         }, status=status.HTTP_200_OK)
 from .serializers import (
     PurchaseOrderCreateSerializer,
@@ -1399,26 +1432,38 @@ class ProjectOutgoingPaymentsAPIView(APIView):
         # 🔍 DEBUG: Check what bills exist for those POs
         bills = VendorBill.objects.filter(purchase_order__in=pos)
         
-        # 🔍 Get payments
-        payments = OutgoingPayment.objects.filter(
-            vendor_bill__in=bills
+        # 🔍 Get all payments tied to this project's bills
+        payments_qs = OutgoingPayment.objects.filter(
+            vendor_bill__purchase_order__project=project
         ).select_related(
             'vendor', 'vendor_bill', 'vendor_bill__purchase_order'
-        ).order_by('-payment_date')
+        ).order_by('-payment_date', '-created_at', '-id')
 
-        total_paid = payments.aggregate(
-            total=Sum('amount')
-        )['total'] or 0
+        payments = list(payments_qs)
+        total_paid = sum(float(p.amount) for p in payments)
 
+        # Additional debug info as key-value objects
+        po_list = [
+            {"po_id": po.id, "po_no": po.po_no}
+            for po in pos
+        ]
+        bill_list = [
+            {"bill_id": b.id, "bill_no": b.bill_no}
+            for b in bills
+        ]
+        
         data = {
             "project_no": project.project_no,
             "project_name": project.project_name,
             "debug": {
                 "purchase_order_count": pos.count(),
                 "vendor_bill_count": bills.count(),
+                "purchase_orders": po_list,
+                "vendor_bills": bill_list,
+                "payment_id": [p.id for p in payments],
             },
             "total_paid": float(total_paid),
-            "payment_count": payments.count(),
+            "payment_count": len(payments),
             "payments": [
                 {
                     "id": p.id,
