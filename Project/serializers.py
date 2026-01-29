@@ -3,11 +3,35 @@ from .models import (Project, ProjectBudget, Task, Timesheet, TimesheetEntry, Ta
                       TaskExtraHoursRequest)
 from django.core.exceptions import ObjectDoesNotExist
 from accounts.models import Account
+from client.serializers import PointOfContactSerializer
+# class ProjectBudgetSerializer(serializers.ModelSerializer):
+#     forecasted_profit = serializers.DecimalField(
+#         max_digits=12, decimal_places=2, read_only=True
+#     )
+#     class Meta:
+#         model = ProjectBudget
+#         fields = (
+#             'use_quoted_amounts',
+#             'total_hours',
+#             'total_budget',
+#             'bills_and_expenses',
+#             'currency',
+#             'forecasted_profit',
+#         )
 
+#     def validate(self, data):
+#         if not data.get('use_quoted_amounts'):
+#             for field in ['total_hours', 'total_budget']:
+#                 if not data.get(field):
+#                     raise serializers.ValidationError(
+#                         f"{field.replace('_',' ')} is required"
+#                     )
+#         return data
 class ProjectBudgetSerializer(serializers.ModelSerializer):
     forecasted_profit = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
     )
+
     class Meta:
         model = ProjectBudget
         fields = (
@@ -20,14 +44,213 @@ class ProjectBudgetSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, data):
-        if not data.get('use_quoted_amounts'):
-            for field in ['total_hours', 'total_budget']:
-                if not data.get(field):
-                    raise serializers.ValidationError(
-                        f"{field.replace('_',' ')} is required"
-                    )
+        project_type = self.context.get('project_type')
+
+        # Quoted amounts → model will fill values
+        if data.get('use_quoted_amounts'):
+            return data
+
+        # Manual budget
+        if project_type == 'external':
+            # STRICT for external
+            missing = []
+            if not data.get('total_hours'):
+                missing.append("total hours")
+            if not data.get('total_budget'):
+                missing.append("total budget")
+
+            if missing:
+                raise serializers.ValidationError(
+                    f"{', '.join(missing)} is required"
+                )
+
+        # Internal → manual budget is OPTIONAL
         return data
+
     
+from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
+# class ProjectCreateSerializer(serializers.ModelSerializer):
+#     budget = ProjectBudgetSerializer(required=False)
+
+#     class Meta:
+#         model = Project
+#         fields = (
+#             'status',
+#             'project_no',
+#             'project_name',
+#             'project_type',
+#             'start_date',
+#             'end_date',
+#             'project_manager',
+#             'created_from_quotation',
+#             'budget',
+#         )
+
+#     def validate(self, data):
+#         start_date = data.get('start_date')
+#         end_date = data.get('end_date')
+#         project_type = data.get('project_type')
+#         quotation = data.get('created_from_quotation')
+
+    
+#         if start_date and end_date and end_date < start_date:
+#             raise serializers.ValidationError(
+#                 "End date cannot be before start date."
+#             )
+
+        
+#         if project_type == 'internal':
+#             # Quotation is NOT required
+#             return data
+
+#         if project_type == 'external':
+
+#             if not quotation:
+#                 raise serializers.ValidationError({
+#                     "created_from_quotation": "Quotation is required for external projects."
+#                 })
+
+        
+#             invalid_statuses = ['Rejected', 'Cancelled', 'Closed']
+#             if quotation.status in invalid_statuses:
+#                 raise serializers.ValidationError({
+#                     "created_from_quotation": (
+#                         f"Project cannot be created because the quotation is {quotation.status}."
+#                     )
+#                 })
+
+           
+#             if quotation.status != 'Confirmed':
+#                 raise serializers.ValidationError({
+#                     "created_from_quotation": "Project can only be created from a Confirmed quotation."
+#                 })
+
+#             if Project.objects.filter(created_from_quotation=quotation).exists():
+#                 raise serializers.ValidationError({
+#                     "created_from_quotation": "A project already exists for this quotation."
+#                 })
+
+#         return data
+
+#     def create(self, validated_data):
+#         budget_data = validated_data.pop('budget', None)
+
+#         project = Project.objects.create(**validated_data)
+
+#         if budget_data:
+#             budget = ProjectBudget.objects.create(
+#                 project=project,
+#                 **budget_data
+#             )
+#             if budget.use_quoted_amounts:
+#                 try:
+#                     budget.apply_quoted_amounts()
+#                     budget.save()
+#                 except DjangoValidationError as e:
+#                     # Surface model-level validation as DRF 400
+#                     raise serializers.ValidationError({"budget": e.messages})
+
+#         return project
+# class ProjectCreateSerializer(serializers.ModelSerializer):
+#     budget = ProjectBudgetSerializer(required=False)
+
+#     class Meta:
+#         model = Project
+#         fields = (
+#             'status',
+#             'project_no',
+#             'project_name',
+#             'project_type',
+#             'start_date',
+#             'end_date',
+#             'project_manager',
+#             'created_from_quotation',
+#             'budget',
+#         )
+
+#     def validate(self, data):
+#         project_type = data.get('project_type')
+#         quotation = data.get('created_from_quotation')
+#         budget = data.get('budget')
+#         start_date = data.get('start_date')
+#         end_date = data.get('end_date')
+
+#         # 🔒 Common validation
+#         if start_date and end_date and end_date < start_date:
+#             raise serializers.ValidationError(
+#                 "End date cannot be before start date."
+#             )
+
+#         # =============================
+#         # 🔹 INTERNAL PROJECT
+#         # =============================
+#         if project_type == 'internal':
+#             # quotation & budget NOT required
+#             return data
+
+#         # =============================
+#         # 🔹 EXTERNAL PROJECT
+#         # =============================
+#         if project_type == 'external':
+
+#             # 1️⃣ Quotation is mandatory
+#             if not quotation:
+#                 raise serializers.ValidationError({
+#                     "created_from_quotation": "Quotation is required for external projects."
+#                 })
+
+#             # 2️⃣ Budget is mandatory
+#             if not budget:
+#                 raise serializers.ValidationError({
+#                     "budget": "Budget is required for external projects."
+#                 })
+
+#             # 3️⃣ Quotation status validation
+#             invalid_statuses = ['Rejected', 'Cancelled', 'Closed']
+#             if quotation.status in invalid_statuses:
+#                 raise serializers.ValidationError({
+#                     "created_from_quotation": (
+#                         f"Project cannot be created because the quotation is {quotation.status}."
+#                     )
+#                 })
+
+#             if quotation.status != 'Confirmed':
+#                 raise serializers.ValidationError({
+#                     "created_from_quotation": (
+#                         "Project can only be created from a Confirmed quotation."
+#                     )
+#                 })
+
+#             # 4️⃣ Prevent duplicate project creation
+#             if Project.objects.filter(created_from_quotation=quotation).exists():
+#                 raise serializers.ValidationError({
+#                     "created_from_quotation": (
+#                         "A project already exists for this quotation."
+#                     )
+#                 })
+
+#         return data
+
+#     def create(self, validated_data):
+#         budget_data = validated_data.pop('budget', None)
+
+#         project = Project.objects.create(**validated_data)
+
+#         # 🔹 Create budget ONLY if provided (external)
+#         if budget_data:
+#             budget = ProjectBudget.objects.create(
+#                 project=project,
+#                 **budget_data
+#             )
+
+#             if budget.use_quoted_amounts:
+#                 try:
+#                     budget.apply_quoted_amounts()
+#                     budget.save()
+#                 except DjangoValidationError as e:
+#                     raise serializers.ValidationError({"budget": e.messages})
+
+#         return project
 
 class ProjectCreateSerializer(serializers.ModelSerializer):
     budget = ProjectBudgetSerializer(required=False)
@@ -45,32 +268,82 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             'created_from_quotation',
             'budget',
         )
+    def get_fields(self):
+        fields = super().get_fields()
+
+        # Safely determine project_type
+        project_type = None
+
+        if hasattr(self, 'initial_data'):
+            project_type = self.initial_data.get('project_type')
+        elif self.instance:
+            project_type = getattr(self.instance, 'project_type', None)
+
+        fields['budget'] = ProjectBudgetSerializer(
+            required=False,
+            context={'project_type': project_type}
+        )
+        return fields
+
 
     def validate(self, data):
-        start_date = data.get('start_date')
-        end_date = data.get('end_date')
         project_type = data.get('project_type')
         quotation = data.get('created_from_quotation')
+        budget = data.get('budget')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
 
-    
+        # 🔒 Common date validation
         if start_date and end_date and end_date < start_date:
             raise serializers.ValidationError(
                 "End date cannot be before start date."
             )
 
-        
+        # =============================
+        # 🔹 INTERNAL PROJECT
+        # =============================
         if project_type == 'internal':
-            # Quotation is NOT required
-            return data
 
-        if project_type == 'external':
-
-            if not quotation:
+            # Quotation should not be used
+            if quotation:
                 raise serializers.ValidationError({
-                    "created_from_quotation": "Quotation is required for external projects."
+                    "created_from_quotation": (
+                        "Quotation is not applicable for internal projects."
+                    )
                 })
 
-        
+            # Budget is OPTIONAL, but must be MANUAL if provided
+            if budget and budget.get('use_quoted_amounts'):
+                raise serializers.ValidationError({
+                    "budget": {
+                        "use_quoted_amounts": (
+                            "Internal projects cannot use quoted amounts."
+                        )
+                    }
+                })
+
+            return data
+
+        # =============================
+        # 🔹 EXTERNAL PROJECT
+        # =============================
+        if project_type == 'external':
+
+            # 1️⃣ Quotation is mandatory
+            if not quotation:
+                raise serializers.ValidationError({
+                    "created_from_quotation": (
+                        "Quotation is required for external projects."
+                    )
+                })
+
+            # 2️⃣ Budget is mandatory
+            if not budget:
+                raise serializers.ValidationError({
+                    "budget": "Budget is required for external projects."
+                })
+
+            # 3️⃣ Quotation status validation
             invalid_statuses = ['Rejected', 'Cancelled', 'Closed']
             if quotation.status in invalid_statuses:
                 raise serializers.ValidationError({
@@ -79,15 +352,19 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
                     )
                 })
 
-           
             if quotation.status != 'Confirmed':
                 raise serializers.ValidationError({
-                    "created_from_quotation": "Project can only be created from a Confirmed quotation."
+                    "created_from_quotation": (
+                        "Project can only be created from a Confirmed quotation."
+                    )
                 })
 
+            # 4️⃣ Prevent duplicate project creation
             if Project.objects.filter(created_from_quotation=quotation).exists():
                 raise serializers.ValidationError({
-                    "created_from_quotation": "A project already exists for this quotation."
+                    "created_from_quotation": (
+                        "A project already exists for this quotation."
+                    )
                 })
 
         return data
@@ -97,16 +374,24 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
 
         project = Project.objects.create(**validated_data)
 
+        # 🔹 Create budget only if provided
         if budget_data:
             budget = ProjectBudget.objects.create(
                 project=project,
                 **budget_data
             )
+
+            # Apply quoted amounts if selected
             if budget.use_quoted_amounts:
-                budget.apply_quoted_amounts()
-                budget.save()
+                try:
+                    budget.apply_quoted_amounts()
+                    budget.save()
+                except DjangoValidationError as e:
+                    raise serializers.ValidationError({"budget": e.messages})
 
         return project
+
+
 
 from finances.serializers import InvoiceListSerializer
 class ProjectListSerializer(serializers.ModelSerializer):
@@ -116,6 +401,7 @@ class ProjectListSerializer(serializers.ModelSerializer):
         source='client.company_name',
         read_only=True
     )
+    contacts=serializers.SerializerMethodField()
 
     class Meta:
         model = Project
@@ -128,6 +414,7 @@ class ProjectListSerializer(serializers.ModelSerializer):
             'budget',
             'invoices',
             'company_name',
+            'contacts',
             'created_from_quotation',
         )
 
@@ -143,6 +430,13 @@ class ProjectListSerializer(serializers.ModelSerializer):
             return []
 
         return InvoiceListSerializer(invoices, many=True).data
+    def get_contacts(self, obj):
+        """Get all POCs (contacts) for the project's client company"""
+        if not obj.client:
+            return []
+        
+        pocs = obj.client.pocs.all()
+        return PointOfContactSerializer(pocs, many=True).data
     
 
 class TaskSerializer(serializers.ModelSerializer):

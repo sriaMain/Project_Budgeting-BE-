@@ -19,7 +19,7 @@ from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 import jwt
 from datetime import datetime, timezone
 from django.contrib.auth import logout
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.db import IntegrityError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from django.db.models import Q, Prefetch
@@ -232,7 +232,8 @@ class UserCreateView(APIView):
     """
     API endpoint for creating new users with profile pictures.
     """
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    # parser_classes = [MultiPartParser, FormParser]
     permission_classes = [AllowAny]
 
     def post(self, request):  # FIXED: Added 'd' to 'def'

@@ -1,5 +1,6 @@
 from django.db import models
-
+from django.core.validators import RegexValidator
+from django.core.exceptions import ValidationError
 
 class CompanyTag(models.Model):
    
@@ -11,14 +12,29 @@ class CompanyTag(models.Model):
     def __str__(self):
         return self.name
 
+gstin_validator = RegexValidator(
+    regex=r"^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$",
+    message="Enter a valid GSTIN (15 characters)."
+)
 
+mobile_validator = RegexValidator(
+    regex=r"^[0-9+\-\s()]{7,10}$",
+    message="Enter a valid mobile number."
+)
 class Company(models.Model):
     # General Information
 
     company_name = models.CharField(max_length=255, unique=True)
-    mobile_number = models.CharField(max_length=20)
+    mobile_number = models.CharField(
+        max_length=20,
+        validators=[mobile_validator]
+    )
     email = models.EmailField(unique=True)
-    gstin = models.CharField(max_length=20, blank=True)
+    gstin = models.CharField(
+        max_length=15,
+        blank=True,
+        validators=[gstin_validator]
+    )
 
     # Address
     street_address = models.TextField(blank=True)
@@ -49,6 +65,10 @@ class Company(models.Model):
 
     def __str__(self):
         return self.company_name
+    def clean(self):
+        if self.gstin and len(self.gstin) != 15:
+            raise ValidationError({"gstin": "GSTIN must be exactly 15 characters."})
+
     
 
 class POC(models.Model):

@@ -136,6 +136,33 @@ def check_running_timers():
             
             exceeded_by_seconds = max(0, final_seconds - allocated_seconds)
             
+            # ✅ UPDATE TIMESHEET with allowed hours only
+            from Project.models import Timesheet, TimesheetEntry
+            from Project.utils import get_week_range
+            
+            entry_date = timezone.now().date()
+            week_start, week_end = get_week_range(entry_date)
+            
+            timesheet, _ = Timesheet.objects.get_or_create(
+                user=user,
+                week_start=week_start,
+                defaults={"week_end": week_end}
+            )
+            
+            # Only log up to allocated hours
+            hours_to_add = Decimal(str(min(allocated_seconds, final_seconds))) / Decimal("3600")
+            
+            entry, created = TimesheetEntry.objects.get_or_create(
+                timesheet=timesheet,
+                task=task,
+                date=entry_date,
+                defaults={"hours": hours_to_add}
+            )
+            
+            if not created:
+                entry.hours = hours_to_add
+                entry.save()
+            
             # Send WebSocket event
             from Project.utils import format_seconds
             formatted_total = format_seconds(final_seconds)
@@ -158,6 +185,8 @@ def check_running_timers():
                         "formatted_time": formatted_total,
                         "formatted_exceeded": formatted_exceeded,
                         "running": False,
+                        "timesheet_updated": True,
+                        "hours_logged": float(hours_to_add),
                         "message": "Task automatically stopped because allocated time was exceeded."
                     }
                 }

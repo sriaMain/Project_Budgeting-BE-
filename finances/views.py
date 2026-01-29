@@ -7,7 +7,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-from django.db.models import Q, Sum, Count
+from django.db.models import Q, Sum, Count,F
 from django.utils import timezone
 from django.http import FileResponse, HttpResponse
 from io import BytesIO
@@ -19,10 +19,11 @@ from .serializers import (
     InvoiceListSerializer, InvoiceDetailSerializer, InvoiceItemSerializer,
     InvoicePaymentSerializer,
     GenerateInvoiceSerializer, RecordPaymentSerializer,
-    SendInvoiceEmailSerializer, CancelInvoiceSerializer, InvoiceStatsSerializer, PurchaseOrderSerializer,ProjectAttachmentSerializer
+    SendInvoiceEmailSerializer, CancelInvoiceSerializer, InvoiceStatsSerializer, PurchaseOrderSerializer,ProjectAttachmentSerializer,ExpenseSerializer, ExpensePaymentSerializer,ProjectExpenseListSerializer
 )
 from .services import InvoiceService
 from django.core.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from product_group.models import Quote
 from django.http import Http404
 from django.conf import settings
@@ -34,7 +35,10 @@ from Project.models import Project
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from decimal import Decimal
-from .models import Invoice, InvoicePayment, ProjectAttachment
+from .models import Invoice, InvoicePayment, ProjectAttachment,Expense
+from django.db.models.functions import Coalesce
+
+
 
 
 class QuotationDetailView(APIView):
@@ -295,76 +299,6 @@ class RecordPaymentView(APIView):
             status=status.HTTP_201_CREATED
         )
 
-# class RecordPaymentView(APIView):
-#     """
-#     Record a payment for an invoice
-    
-#     POST /api/invoices/<invoice_id>/payment/
-#     {
-#         "amount": 5000.00,
-#         "payment_date": "2024-01-15",
-#         "payment_method": "Bank Transfer",
-#         "reference_no": "TXN123456",
-#         "milestone_id": 1,
-#         "notes": "Payment received",
-#         "attachment": <file>
-#     }
-#     """
-#     permission_classes = [IsAuthenticated]
-#     authentication_classes = [JWTAuthentication]
-#     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    
-#     @transaction.atomic
-#     def post(self, request, invoice_id):
-#         invoice = get_object_or_404(Invoice, id=invoice_id)
-        
-#         # Add invoice_id to data
-#         data = request.data.copy()
-#         data['invoice_id'] = invoice_id
-        
-#         serializer = RecordPaymentSerializer(data=data)
-        
-#         if not serializer.is_valid():
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
-#         try:
-#             # Get milestone if provided
-#             milestone = None
-#             if serializer.validated_data.get('milestone_id'):
-#                 milestone = get_object_or_404(
-#                     Invoice,
-#                     id=serializer.validated_data['milestone_id'],
-#                     invoice=invoice
-#                 )
-            
-#             # Record payment
-#             payment = InvoiceService.record_payment(
-#                 invoice=invoice,
-#                 amount=serializer.validated_data['amount'],
-#                 payment_date=serializer.validated_data['payment_date'],
-#                 payment_method=serializer.validated_data['payment_method'],
-#                 reference_no=serializer.validated_data.get('reference_no', ''),
-#                 # milestone=milestone,
-#                 notes=serializer.validated_data.get('notes', ''),
-#                 user=request.user,
-#                 attachment=serializer.validated_data.get('attachment')
-#             )
-            
-#             response_serializer = InvoicePaymentSerializer(payment)
-#             return Response(
-#                 {
-#                     'message': f'Payment of {payment.amount} recorded successfully',
-#                     'payment': response_serializer.data
-#                 },
-#                 status=status.HTTP_201_CREATED
-#             )
-        
-#         except Exception as e:
-#             return Response(
-#                 {'error': str(e)},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
 
 class InvoicePaymentListView(APIView):
     """
@@ -412,55 +346,6 @@ class DownloadInvoicePDFView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
-# class SendInvoiceEmailView(APIView):
-#     """
-#     Send invoice via email
-    
-#     POST /api/invoices/<invoice_id>/send-email/
-#     {
-#         "recipient_emails": ["client@example.com", "finance@example.com"],
-#         "subject": "Invoice #INV-001",
-#         "message": "Please find attached invoice...",
-#         "include_pdf": true
-#     }
-#     """
-#     permission_classes = [IsAuthenticated]
-#     authentication_classes = [JWTAuthentication]
-    
-#     def post(self, request, invoice_id):
-#         invoice = get_object_or_404(Invoice, id=invoice_id)
-        
-#         serializer = SendInvoiceEmailSerializer(data=request.data)
-        
-#         if not serializer.is_valid():
-#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
-#         try:
-#             # Generate PDF if not exists and include_pdf is True
-#             if serializer.validated_data.get('include_pdf', True) and not invoice.pdf_file:
-#                 InvoiceService.generate_pdf(invoice)
-            
-#             # Send email
-#             InvoiceService.send_invoice_email(
-#                 invoice=invoice,
-#                 recipient_emails=serializer.validated_data['recipient_emails'],
-#                 subject=serializer.validated_data.get('subject', ''),
-#                 message=serializer.validated_data.get('message', '')
-#             )
-            
-#             return Response(
-#                 {
-#                     'message': f'Invoice sent successfully to {", ".join(serializer.validated_data["recipient_emails"])}'
-#                 },
-#                 status=status.HTTP_200_OK
-#             )
-        
-#         except Exception as e:
-#             return Response(
-#                 {'error': f'Error sending email: {str(e)}'},
-#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
-#             )
 
 
 class CancelInvoiceView(APIView):
@@ -907,60 +792,6 @@ from .serializers import (
 from .models import PurchaseOrder, PurchaseOrderItem
 from product_group.models import Quote, QuoteItem   
 from accounts.models import Account,Vendor
-
-# class PurchaseOrderCreateAPIView(APIView):
-    # permission_classes = [IsAuthenticated]
-    # authentication_classes = [JWTAuthentication]
-
-    # @transaction.atomic
-    # def post(self, request):
-    #     serializer = PurchaseOrderCreateSerializer(data=request.data)
-    #     serializer.is_valid(raise_exception=True)
-
-    #     quote = get_object_or_404(Quote, id=serializer.validated_data['quote_id'])
-
-    #     vendor = None
-    #     employee = None
-
-    #     if serializer.validated_data.get('vendor_id'):
-    #         vendor = get_object_or_404(Vendor, id=serializer.validated_data['vendor_id'])
-
-    #     if serializer.validated_data.get('employee_id'):
-    #         employee = get_object_or_404(Account, id=serializer.validated_data['employee_id'])
-
-    #     po = PurchaseOrder.objects.create(
-    #         po_number=f"PO-{quote.id}-{PurchaseOrder.objects.count() + 1}",
-    #         quote=quote,
-    #         vendor=vendor,
-    #         employee=employee,
-    #         created_by=request.user
-    #     )
-
-    #     total = 0
-
-    #     for item in serializer.validated_data['items']:
-    #         quote_item = get_object_or_404(QuoteItem, id=item['quote_item_id'])
-
-    #         po_item = PurchaseOrderItem.objects.create(
-    #             purchase_order=po,
-    #             quote_item=quote_item,
-    #             quantity=item['quantity'],
-    #             price_per_unit=quote_item.price_per_unit
-    #         )
-
-    #         total += po_item.amount
-
-    #     po.total_amount = total
-    #     po.save()
-
-    #     return Response(
-    #         {
-    #             "message": "Purchase Order created successfully",
-    #             "purchase_order": PurchaseOrderSerializer(po).data
-    #         },
-    #         status=status.HTTP_201_CREATED
-    #     )
-
 
 
 
@@ -1554,23 +1385,279 @@ class ProjectAttachmentView(APIView):
             status=status.HTTP_204_NO_CONTENT
         )
 
+# class DownloadAttachmentView(APIView):
+#     """Download attachment file"""
+#     permission_classes = [IsAuthenticated]
+#     authentication_classes = [JWTAuthentication]
+
+#     def get(self, request, attachment_id):
+#         import requests
+#         from io import BytesIO
+        
+#         attachment = get_object_or_404(ProjectAttachment, id=attachment_id)
+        
+#         if not attachment.file:
+#             return Response(
+#                 {"error": "File not found"},
+#                 status=status.HTTP_404_NOT_FOUND
+#             )
+        
+#         # Get the Cloudinary URL and download the file
+#         file_url = attachment.file.url
+#         response = requests.get(file_url)
+        
+#         if response.status_code != 200:
+#             return Response(
+#                 {"error": "Failed to download file"},
+#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+#             )
+        
+#         return FileResponse(
+#             BytesIO(response.content),
+#             as_attachment=True,
+#             filename=attachment.file_name,
+#             content_type=attachment.file_type
+#         )
+
+# views.py
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.response import Response
+from rest_framework import status
+
+from .models import ProjectAttachment
+from .serializers import ProjectAttachmentSerializer
+
+class UploadAttachmentView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def post(self, request):
+        serializer = ProjectAttachmentSerializer(
+            data=request.data,
+            context={"request": request}
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+# import time
+# import cloudinary.utils
+
+# from django.shortcuts import get_object_or_404
+# from rest_framework.views import APIView
+# from rest_framework.permissions import IsAuthenticated
+# from rest_framework_simplejwt.authentication import JWTAuthentication
+# from rest_framework.response import Response
+# from rest_framework import status
+
+# from .models import ProjectAttachment
+
+
+# class DownloadAttachmentView(APIView):
+#     permission_classes = [IsAuthenticated]
+#     authentication_classes = [JWTAuthentication]
+
+#     def get(self, request, attachment_id):
+#         attachment = get_object_or_404(ProjectAttachment, id=attachment_id)
+
+#         signed_url, _ = cloudinary.utils.cloudinary_url(
+#             attachment.file.public_id,
+#             resource_type="raw",
+#             format="pdf",          # required (your public_id has no .pdf)
+#             sign_url=True,
+#             expires_at=int(time.time()) + 300
+#         )
+
+#         return Response(
+#             {
+#                 "file_name": attachment.file_name,
+#                 "download_url": signed_url
+#             },
+#             status=status.HTTP_200_OK
+#         )
+import time
+import cloudinary.utils
+from django.shortcuts import get_object_or_404
+from django.http import HttpResponseRedirect
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.response import Response
+from rest_framework import status
+from .models import ProjectAttachment
+from django.http import HttpResponse
+import requests
+
+
+# class DownloadAttachmentView(APIView):
+#     permission_classes = [IsAuthenticated]
+#     authentication_classes = [JWTAuthentication]
+
+
+
+#     def get(self, request, attachment_id):
+#         attachment = get_object_or_404(ProjectAttachment, id=attachment_id)
+        
+#         signed_url, _ = cloudinary.utils.cloudinary_url(
+#             attachment.file.public_id,
+#             resource_type="raw",
+#             sign_url=True,
+#             expires_at=int(time.time()) + 3600
+#         )
+        
+#         # Download from Cloudinary
+#         response = requests.get(signed_url, stream=True)
+        
+#         # Stream to client
+#         django_response = HttpResponse(
+#             response.content,
+#             content_type=response.headers.get('content-type', 'application/octet-stream')
+#         )
+#         django_response['Content-Disposition'] = f'attachment; filename="{attachment.file_name}"'
+        
+#         return django_response
+
+
+
+
+
+import time
+import cloudinary.utils
+from django.shortcuts import get_object_or_404
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.response import Response
+
+from .models import ProjectAttachment
+
+
 class DownloadAttachmentView(APIView):
-    """Download attachment file"""
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
 
     def get(self, request, attachment_id):
         attachment = get_object_or_404(ProjectAttachment, id=attachment_id)
-        
-        if not attachment.file:
-            return Response(
-                {"error": "File not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        return FileResponse(
-            attachment.file.open('rb'),
-            as_attachment=True,
-            filename=attachment.file_name,
-            content_type=attachment.file_type
+
+        signed_url, _ = cloudinary.utils.cloudinary_url(
+            attachment.file.public_id,
+            resource_type="raw",
+            format="pdf",
+            sign_url=True,
+            expires_at=int(time.time()) + 300
         )
+
+        return Response({
+            "file_name": attachment.file_name,
+            "download_url": signed_url
+        })
+class ExpenseAPIView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk=None):
+      
+        if pk:
+            expense = get_object_or_404(Expense, pk=pk)
+            serializer = ExpenseSerializer(expense)
+            return Response(serializer.data)
+
+        # 🔹 LIST / FILTER
+        queryset = Expense.objects.all()
+
+        project_id = request.query_params.get('project')
+        category = request.query_params.get('category')
+        is_paid = request.query_params.get('paid')
+
+        if project_id:
+            queryset = queryset.filter(project_id=project_id)
+
+        if category:
+            queryset = queryset.filter(category=category)
+
+        # 🔥 Annotate total paid (DB-level)
+        queryset = queryset.annotate(
+            total_paid_db=Coalesce(Sum('payments__amount'), 0)
+        )
+
+        if is_paid == 'true':
+            queryset = queryset.filter(total_paid_db__gte=F('amount'))
+
+        elif is_paid == 'false':
+            queryset = queryset.filter(total_paid_db__lt=F('amount'))
+
+        serializer = ExpenseSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    # ➕ CREATE EXPENSE
+    def post(self, request):
+        serializer = ExpenseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(created_by=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    def put(self, request, pk):
+        expense = get_object_or_404(Expense, pk=pk)
+        serializer = ExpenseSerializer(expense, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ExpensePaymentAPIView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    # 💰 ADD PAYMENT
+    def put(self, request, pk):
+        expense = get_object_or_404(Expense, pk=pk)
+        serializer = ExpensePaymentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            serializer.save(expense=expense)
+        except ValidationError as e:
+            raise DRFValidationError({"error": e.messages})
+
+        return Response(
+            {
+                "message": "Payment added successfully",
+                "total_paid": expense.total_paid(),
+                "balance_amount": expense.balance_amount(),
+                "is_fully_paid": expense.is_fully_paid()
+            },
+            status=status.HTTP_200_OK
+        )
+
+class ProjectExpenseListAPIView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id):
+        expenses = Expense.objects.filter(project_id=project_id).order_by('-expense_date')
+
+        serializer = ProjectExpenseListSerializer(expenses, many=True)
+
+        return Response(
+            {
+                "project_id": project_id,
+                "expenses": serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+
+class ExpenseCategoryAPIView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        categories = [
+            {"key": key, "label": label}
+            for key, label in Expense.CATEGORY_CHOICES
+        ]
+
+        return Response(categories)

@@ -10,7 +10,7 @@ from .views import (DownloadAttachmentView, ProjectAttachmentView, QuotationDeta
                     ProjectPaymentAPIView, ProjectPaymentSummaryAPIView, ProjectPaymentsListAPIView,
                     PurchaseOrderCreateAPIView, QuotePurchaseOrderListAPIView, PurchaseOrderDetailAPIView,ProjectPurchaseOrderListAPIView,SendPurchaseOrderEmailView,
                     PurchaseOrderStatusUpdateAPIView, VendorBillCreateAPIView, VendorBillListAPIView,VendorBillByNumberAPIView,
-                    OutgoingPaymentCreateAPIView, VendorBillPaymentListAPIView, ProjectOutgoingPaymentsAPIView)
+                    OutgoingPaymentCreateAPIView, VendorBillPaymentListAPIView, ProjectOutgoingPaymentsAPIView, ExpenseAPIView, ProjectExpenseListAPIView, ExpenseCategoryAPIView,ExpensePaymentAPIView)
 
 urlpatterns = [
    path("test/", lambda r: HttpResponse("FINANCES OK")),
@@ -37,7 +37,7 @@ path("projects/<int:project_id>/payments-list/", ProjectPaymentsListAPIView.as_v
 
 path("purchase-orders/", PurchaseOrderCreateAPIView.as_view()),
 path("purchase-orders/<int:po_id>/", PurchaseOrderDetailAPIView.as_view()),
-path("purchase-orders/<int:po_id>/send-mail/", SendPurchaseOrderEmailView.as_view()),
+path("purchase-orders/<int:po_id>/send-email/", SendPurchaseOrderEmailView.as_view()),
 path("purchase-orders/<int:po_id>/status/", PurchaseOrderStatusUpdateAPIView.as_view()),
 
 path("projects/<int:project_no>/purchase-orders/", ProjectPurchaseOrderListAPIView.as_view()),
@@ -53,4 +53,9 @@ path("projects/<int:project_id>/outgoing-payments/", ProjectOutgoingPaymentsAPIV
 path("projects/<int:project_id>/attachments/",ProjectAttachmentView.as_view(),name="project-attachments",),
 path("attachments/<int:attachment_id>/",ProjectAttachmentView.as_view(),name="delete-attachment",),
 path("attachments/<int:attachment_id>/download/",DownloadAttachmentView.as_view(),name="download-attachment",),
+path('expenses/', ExpenseAPIView.as_view(),name='expenses'),
+path('expenses/<int:pk>/', ExpenseAPIView.as_view(),name='expense-detail'),
+path('expenses/<int:pk>/', ExpensePaymentAPIView.as_view(),name='expense-payments'),
+path('projects/<int:project_id>/expenses/', ProjectExpenseListAPIView.as_view(),name='project-expenses'),
+path('expenses/categories/', ExpenseCategoryAPIView.as_view(),name='expense-categories'),
 ]

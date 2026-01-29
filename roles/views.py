@@ -172,23 +172,44 @@ class RoleListCreateView(APIView):
     #     response['X-Cache'] = 'MISS'
     #     return response
 
+    # def get(self, request):
+    #     cache_key = "roles_list_v1"
+    #     data = cache.get(cache_key)
+
+    #     if data:
+    #         response = Response(data, status=status.HTTP_200_OK)
+    #         response['X-Cache'] = 'HIT'
+    #         return response
+
+    #     roles = Role.objects.all().order_by("role_name")
+    #     serialized = RoleListSerializer(roles, many=True).data
+
+    #     cache.set(cache_key, serialized, timeout=3600)
+
+    #     response = Response(serialized, status=status.HTTP_200_OK)
+    #     response['X-Cache'] = 'MISS'
+    #     return response
+
     def get(self, request):
-        cache_key = "roles_list_v1"
+        cache_key = "roles_list_active_v1"
         data = cache.get(cache_key)
 
         if data:
             response = Response(data, status=status.HTTP_200_OK)
-            response['X-Cache'] = 'HIT'
+            response["X-Cache"] = "HIT"
             return response
 
-        roles = Role.objects.all().order_by("role_name")
+        # ✅ ONLY ACTIVE ROLES
+        roles = Role.objects.filter(is_active=True).order_by("role_name")
+
         serialized = RoleListSerializer(roles, many=True).data
 
         cache.set(cache_key, serialized, timeout=3600)
 
         response = Response(serialized, status=status.HTTP_200_OK)
-        response['X-Cache'] = 'MISS'
+        response["X-Cache"] = "MISS"
         return response
+
 
     def post(self, request):
         # permission_classes = [AllowAny]

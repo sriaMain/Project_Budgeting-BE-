@@ -106,10 +106,9 @@ INSTALLED_APPS = [
     'roles',
     'client',
     'Project',
-
     "channels",
-
     'finances',
+    'Reports',
 
     
 ]

@@ -395,9 +395,7 @@ class CancelInvoiceSerializer(serializers.Serializer):
         return value.strip()
 
 
-# ==============================================================================
-# STATISTICS SERIALIZER
-# ==============================================================================
+
 
 class InvoiceStatsSerializer(serializers.Serializer):
     """Serializer for invoice statistics"""
@@ -418,9 +416,7 @@ class InvoiceStatsSerializer(serializers.Serializer):
     monthly_count = serializers.IntegerField(required=False)
 
 
-# ==============================================================================
-# UPDATE INVOICE SERIALIZER
-# ==============================================================================
+
 
 class UpdateInvoiceSerializer(serializers.ModelSerializer):
     """Serializer for updating invoice details"""
@@ -610,52 +606,106 @@ class InvoiceItemQuantityOverrideSerializer(serializers.Serializer):
         min_value=Decimal('0.01')
     )
 
+# serializers.py
+from rest_framework import serializers
+from .models import ProjectAttachment
+from rest_framework import serializers
+from .models import ProjectAttachment
 
 class ProjectAttachmentSerializer(serializers.ModelSerializer):
-    file_url = serializers.SerializerMethodField()
-    uploaded_by_name = serializers.StringRelatedField(source='uploaded_by', read_only=True)
 
     class Meta:
         model = ProjectAttachment
-        fields = [
+        fields = (
             "id",
             "project",
+            "file",
             "file_name",
             "file_size",
             "file_type",
             "category",
             "uploaded_by",
-            "uploaded_by_name",
             "uploaded_at",
-            "file_url",
-        ]
-        read_only_fields = [
-            "file_name",
-            "file_size",
-            "file_type",
-            "uploaded_by",
-            "uploaded_at",
-            "file_url",
-        ]
+        )
+        read_only_fields = ("uploaded_by", "uploaded_at")
 
-    def get_file_url(self, obj):
-        if obj.file:
-            # Cloudinary URLs are already absolute, just return the URL
-            return obj.file.url
-        return None
-
+    # In your serializer or view
     def create(self, validated_data):
-        # Get file from context (passed by view to avoid pickle issues)
-        uploaded_file = self.context.get("file")
-        if not uploaded_file:
-            raise serializers.ValidationError({"file": "No file was provided in context."})
+        request = self.context.get("request")
+        file = validated_data["file"]
+        
+        # DEBUG: Print upload details
+        print(f"Uploading file: {file.name}")
+        print(f"File size: {file.size}")
+        print(f"Content type: {file.content_type}")
+        
+        validated_data["file_name"] = file.name
+        validated_data["file_size"] = file.size
+        validated_data["file_type"] = file.content_type
 
-        user = self.context.get("user")
+        if request and request.user.is_authenticated:
+            validated_data["uploaded_by"] = request.user
 
-        validated_data["file"] = uploaded_file
-        validated_data["file_name"] = uploaded_file.name
-        validated_data["file_size"] = uploaded_file.size
-        validated_data["file_type"] = uploaded_file.content_type
-        validated_data["uploaded_by"] = user
+        attachment = super().create(validated_data)
+        
+        # DEBUG: Print after upload
+        print(f"Public ID after upload: {attachment.file.public_id}")
+        print(f"URL after upload: {attachment.file.url}")
+        
+        return attachment
+from rest_framework import serializers
+from .models import Expense, ExpensePayment
 
-        return super().create(validated_data)
+
+class ExpenseSerializer(serializers.ModelSerializer):
+    total_paid = serializers.SerializerMethodField()
+    balance_amount = serializers.SerializerMethodField()
+    is_fully_paid = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Expense
+        fields = '__all__'
+        read_only_fields = ('expense_no', 'created_by', 'created_at')
+
+    def get_total_paid(self, obj):
+        return obj.total_paid()
+
+    def get_balance_amount(self, obj):
+        return obj.balance_amount()
+
+    def get_is_fully_paid(self, obj):
+        return obj.is_fully_paid()
+
+
+class ExpensePaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExpensePayment
+        fields = '__all__'
+        read_only_fields = ('expense', 'created_at')
+
+
+class ProjectExpenseListSerializer(serializers.ModelSerializer):
+    total_paid = serializers.SerializerMethodField()
+    balance_amount = serializers.SerializerMethodField()
+    is_fully_paid = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Expense
+        fields = (
+            'id',
+            'expense_no',
+            'amount',
+            'total_paid',
+            'balance_amount',
+            'is_fully_paid',
+        )
+
+    def get_total_paid(self, obj):
+        return obj.total_paid()
+
+    def get_balance_amount(self, obj):
+        return obj.balance_amount()
+
+    def get_is_fully_paid(self, obj):
+        return obj.is_fully_paid()
+

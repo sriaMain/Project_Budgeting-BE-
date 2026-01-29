@@ -20,50 +20,100 @@ from django.core.cache import cache
 from rest_framework_simplejwt.tokens import RefreshToken
 from accounts.models import Account, PasswordResetOTP
 import pytz
+from django.db.models import Q
+from rest_framework.validators import UniqueValidator
+from roles.models import Role
+from product_group.models import Product_Services
+import uuid
 
 User = get_user_model()
 
 # --------------------
 # LOGIN
 # --------------------
+# class LoginSerializer(serializers.Serializer):
+#     identifier = serializers.CharField()
+#     password = serializers.CharField(write_only=True)
+
+#     def validate(self, attrs):
+#         identifier = attrs.get("identifier", "").strip()
+#         password = attrs.get("password", "")
+
+#         if not identifier:
+#             raise serializers.ValidationError({"error": "Identifier required"})
+#         if len(password) < 8:
+#             raise serializers.ValidationError({"error": "Invalid password (min 8 chars)"})
+
+#         # Resolve user (username or email)
+#         user = None
+#         if "@" in identifier:
+#             user = User.objects.filter(email__iexact=identifier).first()
+#             if not user:
+#                 raise serializers.ValidationError({"error": "Email not registered"})
+#         else:
+#             user = User.objects.filter(username__iexact=identifier).first()
+#             if not user:
+#                 raise serializers.ValidationError({"error": "Username not found"})
+
+#         if not user.check_password(password):
+#             raise serializers.ValidationError({"error": "Invalid password"})
+
+#         refresh = RefreshToken.for_user(user)
+#         data = {
+#             "refresh": refresh,
+#             "access": str(refresh.access_token),
+#             "user": {
+#                 "id": user.id,
+#                 "username": user.username,
+#                 "email": user.email
+#             }
+#         }
+#         return data
+
 class LoginSerializer(serializers.Serializer):
-    identifier = serializers.CharField()
-    password = serializers.CharField(write_only=True)
+    identifier = serializers.CharField(required=True)
+    password = serializers.CharField(write_only=True, required=True)
 
     def validate(self, attrs):
-        identifier = attrs.get("identifier", "").strip()
-        password = attrs.get("password", "")
+        identifier = attrs.get("identifier").strip()
+        password = attrs.get("password")
 
-        if not identifier:
-            raise serializers.ValidationError({"error": "Identifier required"})
-        if len(password) < 8:
-            raise serializers.ValidationError({"error": "Invalid password (min 8 chars)"})
+        # ✅ Find user by email OR username OR full name
+        user = Account.objects.filter(
+            Q(email__iexact=identifier) |
+            Q(username__iexact=identifier) |
+            Q(first_name__iexact=identifier) |
+            Q(last_name__iexact=identifier) |
+            Q(first_name__iexact=identifier.split(" ")[0]) |
+            Q(first_name__iexact=identifier) |
+            Q(first_name__iexact=identifier)  # safe fallback
+        ).first()
 
-        # Resolve user (username or email)
-        user = None
-        if "@" in identifier:
-            user = User.objects.filter(email__iexact=identifier).first()
-            if not user:
-                raise serializers.ValidationError({"error": "Email not registered"})
-        else:
-            user = User.objects.filter(username__iexact=identifier).first()
-            if not user:
-                raise serializers.ValidationError({"error": "Username not found"})
+        if not user:
+            raise serializers.ValidationError({"error": "User not found."})
 
-        if not user.check_password(password):
-            raise serializers.ValidationError({"error": "Invalid password"})
+        if not user.is_active:
+            raise serializers.ValidationError({"error": "Your account is inactive. Please contact admin."})
 
-        refresh = RefreshToken.for_user(user)
-        data = {
-            "refresh": refresh,
+        # ✅ authenticate always needs username internally
+        auth_user = authenticate(username=user.username, password=password)
+
+        if not auth_user:
+            raise serializers.ValidationError({"error": "Invalid password."})
+
+        refresh = RefreshToken.for_user(auth_user)
+
+        return {
             "access": str(refresh.access_token),
+            "refresh": refresh,
             "user": {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email
+                "id": auth_user.id,
+                "email": auth_user.email,
+                "username": auth_user.username,
+                "first_name": auth_user.first_name,
+                "last_name": auth_user.last_name,
             }
         }
-        return data
 
 
 
@@ -321,39 +371,49 @@ class UserDetailSerializer(serializers.ModelSerializer):
 
     def get_roles(self, obj):
         return [r.id for r in obj.roles.all()]
+    
 
-from rest_framework.validators import UniqueValidator
-from roles.models import Role
-from product_group.models import Product_Services
-import uuid
 
 class UserCreateSerializer(serializers.ModelSerializer):
     roles = serializers.PrimaryKeyRelatedField(
-        queryset=Role.objects.filter(is_active=True),
+        queryset=Role.objects.all(),   # allow lookup
         many=True,
         required=True,
-        allow_empty=False,  # Ensures at least one role is provided
+        allow_empty=False,
         error_messages={
             'required': 'The roles field is required.',
             'allow_empty': 'At least one role must be selected.',
-            'does_not_exist': 'Invalid role pk "{pk_value}" - object does not exist.',
         }
     )
 
     email = serializers.EmailField(
         required=True,
-        validators=[UniqueValidator(
-            queryset=Account.objects.all(),
-            message="A user with this email already exists."
-        )]
+        validators=[
+            UniqueValidator(
+                queryset=Account.objects.all(),
+                message="A user with this email already exists."
+            )
+        ]
     )
+
     first_name = serializers.CharField(required=True)
     position = serializers.CharField(required=True)
+
     module = serializers.PrimaryKeyRelatedField(
-        queryset=Product_Services.objects.all(), 
+        queryset=Product_Services.objects.all(),
         required=True
     )
-    charges_per_hour = serializers.DecimalField(max_digits=10, decimal_places=2, required=True)
+
+    charges_per_hour = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        required=True
+    )
+    currency = serializers.ChoiceField(
+        choices=[("INR", "INR"), ("USD", "USD"), ("EUR", "EUR")],
+        required=False,
+        default="INR"
+    )
 
     class Meta:
         model = Account
@@ -364,66 +424,214 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "position",
             "module",
             "charges_per_hour",
+            "currency", 
             "roles",
             "profile_picture",
             "languages",
             "is_active",
         ]
 
-    def validate_email(self, value):
-        """Normalize email to lowercase and strip whitespace"""
-        return value.lower().strip()
+    # 🔒 BLOCK INACTIVE ROLES
+    def validate_roles(self, roles):
+        inactive_roles = [r.role_name for r in roles if not r.is_active]
+
+        if inactive_roles:
+            raise serializers.ValidationError(
+                f"Inactive roles cannot be assigned: {', '.join(inactive_roles)}."
+            )
+
+        return roles
 
     def validate_charges_per_hour(self, value):
-        """Ensure charges_per_hour is positive if provided"""
-        if value is not None and value < 0:
-            raise serializers.ValidationError("Charges per hour must be positive.")
+        if value < 0:
+            raise serializers.ValidationError(
+                "Charges per hour must be positive."
+            )
         return value
 
     def create(self, validated_data):
-        import string, random
-        roles = validated_data.pop("roles", [])
+        import uuid, random, string
+
+        roles = validated_data.pop("roles")
         email = validated_data.pop("email").lower().strip()
-        # Ensure a unique username (required by AbstractUser)
-        base_username = email.split("@")[0]
-        username = f"{base_username}-{uuid.uuid4().hex[:8]}"
-        # Generate a random password
-        password = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+
+        username = f"{email.split('@')[0]}-{uuid.uuid4().hex[:8]}"
+        password = ''.join(
+            random.choices(string.ascii_letters + string.digits, k=10)
+        )
+
         user = User.objects.create_user(
             username=username,
             email=email,
             password=password,
             **validated_data
         )
-        if roles:
-            user.roles.set(roles)
-            # Set is_staff True only for Admins
-            if any(role.role_name == "Admin" for role in user.roles.all()):
-                user.is_staff = True
-            else:
-                user.is_staff = False
-            user.save(update_fields=["is_staff"])
-        # Send password to user via email
-        subject = "Your Account Registration"
-        msg = f"Hello {user.get_full_name() or user.username},\n\nYour account has been created. Your login password is: {password}\n\nPlease change your password after logging in."
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
-        send_mail(subject, msg, from_email, [user.email], fail_silently=False)
+
+        user.roles.set(roles)
+
+        user.is_staff = any(
+            role.role_name == "Admin" for role in roles
+        )
+        user.save(update_fields=["is_staff"])
+
+        send_mail(
+            subject="Your Account Registration",
+            message=(
+                f"Hello {user.get_full_name() or user.username},\n\n"
+                f"Your account has been created.\n"
+                f"Password: {password}\n\n"
+                f"Please change your password after logging in."
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False
+        )
+
         return user
 
+# from rest_framework.validators import UniqueValidator
+# from roles.models import Role
+# from product_group.models import Product_Services
+# import uuid
+
+# class UserCreateSerializer(serializers.ModelSerializer):
+#     # roles = serializers.PrimaryKeyRelatedField(
+#     #     queryset=Role.objects.filter(is_active=True),
+#     #     many=True,
+#     #     required=True,
+#     #     allow_empty=False,  # Ensures at least one role is provided
+#     #     error_messages={
+#     #         'required': 'The roles field is required.',
+#     #         'allow_empty': 'At least one role must be selected.',
+#     #         'does_not_exist': 'Invalid role pk "{pk_value}" - object does not exist.',
+#     #     }
+#     # )
+#     roles = serializers.PrimaryKeyRelatedField(
+#         queryset=Role.objects.all(),   # 👈 IMPORTANT CHANGE
+#         many=True,
+#         required=True,
+#         allow_empty=False,
+#         error_messages={
+#             'required': 'The roles field is required.',
+#             'allow_empty': 'At least one role must be selected.',
+#         }
+#     )
 
 
+#     email = serializers.EmailField(
+#         required=True,
+#         validators=[UniqueValidator(
+#             queryset=Account.objects.all(),
+#             message="A user with this email already exists."
+#         )]
+#     )
+#     first_name = serializers.CharField(required=True)
+#     position = serializers.CharField(required=True)
+#     module = serializers.PrimaryKeyRelatedField(
+#         queryset=Product_Services.objects.all(), 
+#         required=True
+#     )
+#     charges_per_hour = serializers.DecimalField(max_digits=10, decimal_places=2, required=True)
 
+#     class Meta:
+#         model = Account
+#         fields = [
+#             "first_name",
+#             "last_name",
+#             "email",
+#             "position",
+#             "module",
+#             "charges_per_hour",
+#             "roles",
+#             "profile_picture",
+#             "languages",
+#             "is_active",
+#         ]
 
+#     def validate_email(self, value):
+#         """Normalize email to lowercase and strip whitespace"""
+#         normalized = value.lower().strip()
 
+#         # Catch common typos such as gmail.cm instead of gmail.com
+#         local, _, domain = normalized.partition("@")
+#         if not domain:
+#             raise serializers.ValidationError("Enter a valid email address.")
 
+#         # Common valid email providers
+#         common_providers = {
+#             "gmail.com", "outlook.com", "yahoo.com", "hotmail.com", 
+#             "icloud.com", "protonmail.com", "aol.com", "live.com"
+#         }
+        
+#         # Check for suspicious TLD typos (.cm, .co instead of .com)
+#         suspicious_tlds = [".cm", ".co", ".con", ".cpm", ".om"]
+#         for tld in suspicious_tlds:
+#             if domain.endswith(tld):
+#                 # Try replacing with .com
+#                 possible_correct = domain[:-len(tld)] + ".com"
+#                 if possible_correct in common_providers:
+#                     raise serializers.ValidationError(
+#                         f"Email domain looks wrong. Did you mean {local}@{possible_correct}?"
+#                     )
+        
+#         # Check for common provider name typos (gamil, gmal, outlok, etc.)
+#         domain_parts = domain.split(".")
+#         if len(domain_parts) >= 2:
+#             base_domain = domain_parts[0]
+#             tld = ".".join(domain_parts[1:])
+            
+#             # Map common typos to correct provider names
+#             provider_corrections = {
+#                 "gamil": "gmail", "gmal": "gmail", "gmai": "gmail",
+#                 "gmial": "gmail", "gmaill": "gmail",
+#                 "outlok": "outlook", "outloo": "outlook",
+#                 "yaho": "yahoo", "yahooo": "yahoo"
+#             }
+            
+#             if base_domain in provider_corrections:
+#                 correct_base = provider_corrections[base_domain]
+#                 suggested_domain = f"{correct_base}.{tld}"
+#                 raise serializers.ValidationError(
+#                     f"Email domain looks wrong. Did you mean {local}@{suggested_domain}?"
+#                 )
 
+#         return normalized
 
+#     def validate_charges_per_hour(self, value):
+#         """Ensure charges_per_hour is positive if provided"""
+#         if value is not None and value < 0:
+#             raise serializers.ValidationError("Charges per hour must be positive.")
+#         return value
 
-
-
-
-
-
+#     def create(self, validated_data):
+#         import string, random
+#         roles = validated_data.pop("roles", [])
+#         email = validated_data.pop("email").lower().strip()
+#         # Ensure a unique username (required by AbstractUser)
+#         base_username = email.split("@")[0]
+#         username = f"{base_username}-{uuid.uuid4().hex[:8]}"
+#         # Generate a random password
+#         password = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+#         user = User.objects.create_user(
+#             username=username,
+#             email=email,
+#             password=password,
+#             **validated_data
+#         )
+#         if roles:
+#             user.roles.set(roles)
+#             # Set is_staff True only for Admins
+#             if any(role.role_name == "Admin" for role in user.roles.all()):
+#                 user.is_staff = True
+#             else:
+#                 user.is_staff = False
+#             user.save(update_fields=["is_staff"])
+#         # Send password to user via email
+#         subject = "Your Account Registration"
+#         msg = f"Hello {user.get_full_name() or user.username},\n\nYour account has been created. Your login password is: {password}\n\nPlease change your password after logging in."
+#         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
+#         send_mail(subject, msg, from_email, [user.email], fail_silently=False)
+#         return user
 
 
 

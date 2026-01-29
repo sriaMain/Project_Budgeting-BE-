@@ -23,6 +23,15 @@ class Account(AbstractUser, RBACUserMixin):
         null=True,
         blank=True,
     )
+    currency = models.CharField(
+        max_length=3,
+        choices=[
+            ("INR", "Indian Rupee"),
+            ("USD", "US Dollar"),
+            ("EUR", "Euro"),
+        ],
+        default="INR"
+    )
     # Do not force a specific storage backend here — use the project's
     # DEFAULT_FILE_STORAGE. This avoids instantiating Cloudinary storage
     # during model import when Cloudinary credentials may be invalid.

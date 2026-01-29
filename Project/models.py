@@ -223,7 +223,7 @@ class TimesheetEntry(models.Model):
         related_name='time_entries'
     )
     date = models.DateField()
-    hours = models.DecimalField(max_digits=4, decimal_places=2)
+    hours = models.DecimalField(max_digits=6, decimal_places=4)
 
     class Meta:
         unique_together = ('timesheet', 'task', 'date')

@@ -1,6 +1,4 @@
 
-
-
 from django.db import models
 from django.utils import timezone
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -416,8 +414,10 @@ class OutgoingPayment(models.Model):
         bill = VendorBill.objects.get(id=self.vendor_bill_id)
         bill.update_status()
         bill.save()
-
+# models.py
+from django.db import models
 from cloudinary.models import CloudinaryField
+
 class ProjectAttachment(models.Model):
 
     CATEGORY_CHOICES = (
@@ -435,7 +435,14 @@ class ProjectAttachment(models.Model):
         related_name="attachments"
     )
 
-    file = CloudinaryField('attachment', folder='project_attachments', resource_type='auto')
+    file = CloudinaryField(
+        "attachment",
+        folder="project_attachments",
+        resource_type="raw",
+        type="upload"   # 🔥 PUBLIC FILE
+)
+
+
     file_name = models.CharField(max_length=255)
     file_size = models.PositiveIntegerField()
     file_type = models.CharField(max_length=100)
@@ -456,4 +463,144 @@ class ProjectAttachment(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.file_name} ({self.project_id})"
+        return self.file_name
+
+
+
+
+
+from django.db import models, transaction
+from django.core.exceptions import ValidationError
+from django.utils import timezone
+from decimal import Decimal
+from django.db.models import Sum
+from django.core.validators import MinValueValidator
+import uuid
+
+
+class Expense(models.Model):
+
+    CATEGORY_CHOICES = [
+        ('rent', 'Rent'),
+        ('travel', 'Travel'),
+        ('food', 'Food'),
+        ('internet', 'Internet'),
+        ('electricity', 'Electricity'),
+        ('software', 'Software'),
+        ('maintenance', 'Maintenance'),
+        ('other', 'Other'),
+    ]
+
+    expense_no = models.CharField(
+        max_length=40,
+        unique=True,
+        editable=False,
+        db_index=True
+    )
+
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES)
+
+    project = models.ForeignKey(
+        'Project.Project',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='expenses'
+    )
+
+    vendor = models.ForeignKey(
+        'accounts.Vendor',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+
+    expense_date = models.DateField(default=timezone.localdate)
+
+    description = models.TextField()
+
+    amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.01'))]
+    )
+
+    created_by = models.ForeignKey(
+        'accounts.Account',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='expenses_created'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-expense_date', '-created_at']
+
+    def __str__(self):
+        return self.expense_no
+
+    # 🔐 MODEL VALIDATIONS
+    def clean(self):
+        if self.expense_date > timezone.localdate():
+            raise ValidationError("Expense date cannot be in the future")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+
+        if not self.expense_no:
+            self.expense_no = f"EXP-{timezone.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+
+        super().save(*args, **kwargs)
+
+    # 🔥 DERIVED FINANCIAL STATE
+    def total_paid(self):
+        return self.payments.aggregate(
+            total=Sum('amount')
+        )['total'] or Decimal('0.00')
+
+    def balance_amount(self):
+        return self.amount - self.total_paid()
+
+    def is_fully_paid(self):
+        return self.balance_amount() <= 0
+
+
+class ExpensePayment(models.Model):
+
+    PAYMENT_METHOD_CHOICES = [
+        ('bank', 'Bank Transfer'),
+        ('upi', 'UPI'),
+        ('cash', 'Cash'),
+        ('card', 'Card'),
+    ]
+
+    expense = models.ForeignKey(
+        Expense,
+        related_name='payments',
+        on_delete=models.PROTECT
+    )
+
+    payment_date = models.DateField(default=timezone.localdate)
+
+    amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.01'))]
+    )
+
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
+    reference_no = models.CharField(max_length=100, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @transaction.atomic
+    def save(self, *args, **kwargs):
+
+        if self.expense.is_fully_paid():
+            raise ValidationError("Expense is already fully paid")
+
+        if self.amount > self.expense.balance_amount():
+            raise ValidationError("Payment exceeds expense balance")
+
+        super().save(*args, **kwargs)

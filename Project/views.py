@@ -17,7 +17,7 @@ from django.db.models import F
 from django.shortcuts import get_object_or_404
 from .tasks import send_task_assignment_email
 from .utils import format_seconds
-
+from django.db.models import Q
 from datetime import timedelta, datetime
 
 
@@ -588,8 +588,6 @@ class TaskAPIView(APIView):
                 {"message": "Task deleted successfully"},
                 status=status.HTTP_204_NO_CONTENT
             )
-
-
 class ServiceUsersAPIView(APIView):
     # permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
@@ -966,31 +964,38 @@ class StartTaskTimerAPIView(APIView):
                 status=403
             )
 
-        # 🚫 Check if task was already stopped today
-        today_logs = TaskTimerLog.objects.filter(
+        # 🚫 Check if task was STOPPED (not paused) today
+        # After stopping, a task cannot be restarted same day
+        # But after pausing, it can be resumed
+        today = timezone.now().date()
+        
+        # Check if there are any active timers (means it was paused, not stopped)
+        has_paused_timer = TaskTimerLog.objects.filter(
             task_id=task_id,
             user=user,
-            is_active=False,
-            end_time__date=timezone.now().date()
-        )
+            end_time__date=today
+        ).exists()
         
-        if today_logs.exists():
-            # Check if timesheet entry exists (means it was stopped, not just paused)
-            today = timezone.now().date()
-            timesheet_exists = TimesheetEntry.objects.filter(
-                timesheet__user=user,
-                task_id=task_id,
-                date=today
-            ).exists()
-            
-            if timesheet_exists:
-                return Response(
-                    {
-                        "error": "This task has already been stopped today and cannot be restarted.",
-                        "message": "Task timer was stopped and logged to timesheet. You cannot restart a stopped task."
-                    },
-                    status=400
-                )
+        # Check Redis to see if this was a "stop" or just a "pause"
+        # If timesheet exists but no "stop" marker in Redis, allow restart (it was paused)
+        from django_redis import get_redis_connection
+        redis_conn = get_redis_connection("default")
+        stop_marker_key = f"task_stopped:{user.id}:{task_id}:{today}"
+        stop_marker = redis_conn.get(stop_marker_key)
+        
+        print(f"DEBUG START: Task {task_id}, User {user.id}, Date {today}")
+        print(f"DEBUG START: Stop marker key: {stop_marker_key}")
+        print(f"DEBUG START: Stop marker value: {stop_marker}")
+        print(f"DEBUG START: Stop marker exists: {stop_marker is not None}")
+        
+        if stop_marker is not None:
+            return Response(
+                {
+                    "error": "This task has been stopped today and cannot be restarted.",
+                    "message": "Task timer was stopped and logged to timesheet. You cannot restart a stopped task."
+                },
+                status=400
+            )
 
         # ⏱ Check if another timer is already running
         if has_active_timer(user.id):
@@ -1112,7 +1117,6 @@ class StartTaskTimerAPIView(APIView):
         )
 
 
-
 from .utils import get_week_range
 
 
@@ -1173,14 +1177,81 @@ class PauseTaskTimerAPIView(APIView):
 
         timer.end_time = end_time
         timer.is_active = False
-        timer.duration_minutes = elapsed_seconds // 60
+        timer.duration_minutes = max(1, elapsed_seconds // 60)  # Store for display, minimum 1 minute
         timer.save()
+
+        # ✅ UPDATE TIMESHEET (same logic as Stop)
+        # Get entry date for today
+        entry_date = timezone.now().date()
+        
+        # Calculate total seconds from all logs for TODAY by summing actual elapsed time
+        # IMPORTANT: Query AFTER saving timer to include the current session
+        timer_logs = TaskTimerLog.objects.filter(
+            task_id=task_id,
+            user=user,
+            is_active=False,
+            end_time__isnull=False,
+            start_time__isnull=False
+        )
+        
+        print(f"DEBUG: Found {timer_logs.count()} timer logs for task {task_id}, user {user.id}")
+
+        # Sum actual elapsed seconds only for TODAY
+        total_seconds_today = 0
+        for log in timer_logs:
+            # Check if log is from today
+            log_date = log.end_time.date()
+            log_seconds = int((log.end_time - log.start_time).total_seconds())
+            print(f"DEBUG: Log {log.id} - Date: {log_date}, Entry Date: {entry_date}, Match: {log_date == entry_date}, Seconds: {log_seconds}")
+            if log_date == entry_date:
+                total_seconds_today += log_seconds
+        
+        print(f"DEBUG: Total seconds today: {total_seconds_today}")
+
+        # Compute prior worked seconds (before today) for this task/user
+        prior_seconds = 0
+        for log in timer_logs:
+            # Check if log is NOT from today
+            if log.end_time.date() < entry_date and log.start_time:
+                prior_seconds += int((log.end_time - log.start_time).total_seconds())
+
+        # Allocation window in seconds
+        task_obj = Task.objects.get(id=task_id)
+        allocated_seconds = int(float(task_obj.allocated_hours) * 3600)
+
+        remaining_allowance_seconds = max(allocated_seconds - prior_seconds, 0)
+        seconds_to_add = min(total_seconds_today, remaining_allowance_seconds)
+
+        hours_to_add = Decimal(seconds_to_add) / Decimal("3600")
+
+        # CREATE / UPDATE TIMESHEET ENTRY
+        entry_date = timezone.now().date()
+        week_start, week_end = get_week_range(entry_date)
+
+        timesheet, _ = Timesheet.objects.get_or_create(
+            user=user,
+            week_start=week_start,
+            defaults={"week_end": week_end}
+        )
+
+        entry, created = TimesheetEntry.objects.get_or_create(
+            timesheet=timesheet,
+            task_id=task_id,
+            date=entry_date,
+            defaults={"hours": hours_to_add}
+        )
+
+        if not created:
+            entry.hours = hours_to_add  # Replace with current total
+            entry.save()
+        
+        # Log what we saved
+        print(f"DEBUG: Timesheet entry saved - Task {task_id}, Date {entry_date}, Hours: {float(hours_to_add)}, Total seconds today: {total_seconds_today}, Seconds to add: {seconds_to_add}")
 
         # ✅ Clear redis timer state so user can resume later
         clear_active_timer(user.id)
 
         # 🔥 Calculate accumulated time from previous logs
-        from Project.models import Task
         task = Task.objects.filter(id=task_id).first()
         if not task:
             return Response({"error": "Task not found."}, status=400)
@@ -1241,12 +1312,22 @@ class PauseTaskTimerAPIView(APIView):
             )
 
         return Response({
-            "message": "Timer paused",
+            "message": "Timer paused and timesheet updated",
             "worked_seconds": elapsed_seconds,
             "consumed_hours": consumed_hours,
             "remaining_hours": float(task.remaining_hours),
             "total_seconds": prev_seconds,
             "formatted_time": seconds_to_hms(prev_seconds),
+            "hours_logged": float(hours_to_add),
+            "total_seconds_today": total_seconds_today,
+            "seconds_to_add": seconds_to_add,
+            "debug_info": {
+                "prior_seconds": prior_seconds,
+                "allocated_seconds": allocated_seconds,
+                "remaining_allowance": remaining_allowance_seconds,
+                "logs_count": timer_logs.count()
+            },
+            "timesheet_updated": True,
             "running": False
         })
 
@@ -1272,11 +1353,11 @@ class StopTaskTimerAPIView(APIView):
                 status=400
             )
 
-        # ✅ Total duration in seconds (duration_minutes already stored in minutes)
-        total_minutes_today = timer_logs.aggregate(
-            total=Sum("duration_minutes")
-        )["total"] or 0
-        total_seconds_today = int(total_minutes_today * 60)
+        # ✅ Total duration in seconds - calculate from actual elapsed time
+        total_seconds_today = 0
+        for log in timer_logs:
+            if log.start_time and log.end_time:
+                total_seconds_today += int((log.end_time - log.start_time).total_seconds())
 
         # -------------------------------
         # CAP LOGGING TO ALLOCATED HOURS (NO EXTRA UNTIL APPROVAL)
@@ -1328,8 +1409,7 @@ class StopTaskTimerAPIView(APIView):
         # CREATE / UPDATE TIMESHEET ENTRY (ONLY ALLOWED PORTION)
         # -------------------------------
         entry_date = timezone.now().date()
-        week_start = entry_date - timedelta(days=entry_date.weekday())
-        week_end = week_start + timedelta(days=6)
+        week_start, week_end = get_week_range(entry_date)
 
         timesheet, _ = Timesheet.objects.get_or_create(
             user=user,
@@ -1350,9 +1430,18 @@ class StopTaskTimerAPIView(APIView):
 
         # ✅ Clear redis timer state so user can start a new timer
         clear_active_timer(user.id)
+        
+        # 🔴 Mark task as STOPPED (not just paused) - cannot restart today
+        from django_redis import get_redis_connection
+        redis_conn = get_redis_connection("default")
+        today = timezone.now().date()
+        redis_conn.setex(
+            f"task_stopped:{user.id}:{task_id}:{today}",
+            86400,  # Expire at end of day (24 hours)
+            "1"
+        )
 
         # 🔥 Calculate accumulated time from previous logs
-        from Project.models import Task
         task = Task.objects.get(id=task_id)
         previous_logs = TaskTimerLog.objects.filter(
             task=task,
@@ -1743,9 +1832,10 @@ class TaskGroupedByStatusAPIView(APIView):
             for status in status_keys
         }
 
-        # 3️⃣ Fetch tasks (optimized)
+        # 3️⃣ Fetch tasks assigned to the logged-in user (optimized)
         queryset = (
             Task.objects
+            .filter(assigned_to=request.user)
             .select_related("project", "assigned_to", "created_by", "modified_by")
             .prefetch_related("time_entries")
         )
@@ -1755,7 +1845,6 @@ class TaskGroupedByStatusAPIView(APIView):
             serialized = TaskSerializer(task).data
             response_data[task.status]["tasks"].append(serialized)
             response_data[task.status]["count"] += 1
-            return Response(response_data)
 
         return Response(response_data)
 
