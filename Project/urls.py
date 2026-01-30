@@ -35,13 +35,10 @@ urlpatterns = [
 
     path("tasks/grouped-by-status/", TaskGroupedByStatusAPIView.as_view(), name="task-status-grouped"),
 
-    # path()
-    
-        
 
     path("tasks/<int:task_id>/timer/stop/", StopTaskTimerAPIView.as_view(), name="task-timer-stop"),
     path('timesheet/weekly-summary/', TimesheetWeeklySummaryAPIView.as_view(), name='timesheet-weekly-summary'),
     path('timesheet/employee/<int:user_id>/', TimesheetEmployeeAPIView.as_view(), name='timesheet-employee'),
-    # path()
+    
 
 ]

@@ -26,6 +26,7 @@ class Project(models.Model):
         ('USD', 'USD'),
         ('EUR', 'EUR'),
     ]
+    
     status = models.CharField(
     max_length=50,
     choices=STATUS_CHOICES,
