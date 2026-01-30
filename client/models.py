@@ -43,20 +43,11 @@ class Company(models.Model):
     municipality = models.CharField(max_length=100, blank=True)
     state = models.CharField(max_length=100, blank=True)
     country = models.CharField(max_length=100, blank=True)
-    
-    
-    # poc_name = models.CharField(max_length=150, blank=True)
-    # poc_designation = models.CharField(max_length=100, blank=True)
-    # poc_mobile = models.CharField(max_length=20, blank=True)
-    # poc_email = models.EmailField(blank=True)
-
-    # Tags
     tags = models.ManyToManyField(
         CompanyTag,
         related_name="companies",
         blank=True
     )
-
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

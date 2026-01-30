@@ -53,9 +53,7 @@ class Product_Services(models.Model):
     
 
 class Quote(models.Model):
-    """
-    This model stores the main details of the quote (the header).
-    """
+
     STATUS_CHOICES = [
         ('Oppurtunity', 'Oppurtunity'),
         ('Scoping', 'Scoping'),

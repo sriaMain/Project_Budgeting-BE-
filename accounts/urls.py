@@ -1,4 +1,4 @@
-# accounts/urls.py
+
 from django.urls import path
 from .views import (LoginView, OTPRequestView, OTPVerifyView, ResetPasswordView,ResendOTPView
                     ,LogoutView, RefreshTokenCookieView, UserCreateView, UserListView, UserDetailVieW,VendorListCreateView, VendorChoicesAPIView)
@@ -10,11 +10,7 @@ urlpatterns = [
     path("resend-otp/", ResendOTPView.as_view(), name="resend-otp"),
     # path("session-check/", SessionCheckView.as_view(), name="session-check"),
     path('refresh/', RefreshTokenCookieView.as_view(), name='token_refresh'),
-
-    # 3. Check Access Token Expiry Time
     # path('token/expiry/', AccessTokenExpiryView.as_view(), name='token_expiry'),
-
-    # 4. Logout (delete both cookies)
     path('logout/', LogoutView.as_view(), name='logout'),
     path("users/create/", UserCreateView.as_view(), name="user-create"),
     path("users/", UserListView.as_view(), name="user-detail"),

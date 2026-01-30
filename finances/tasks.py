@@ -2,7 +2,10 @@ from celery import shared_task
 from django.core.mail import send_mail
 from django.conf import settings
 from .models import PurchaseOrder
-
+from django.core.mail import EmailMultiAlternatives
+from django.template.loader import render_to_string
+from .models import Invoice
+from .services import InvoicePDFService
 
 @shared_task
 def send_invoice_status_change_email(invoice_id, old_status, new_status):
@@ -60,44 +63,8 @@ def send_invoice_status_change_email(invoice_id, old_status, new_status):
     )
     email.attach_alternative(html_message, "text/html")
     email.send(fail_silently=False)
-# finances/tasks.py
-
-from celery import shared_task
-from django.core.mail import EmailMultiAlternatives
-from django.template.loader import render_to_string
-from django.conf import settings
-from .models import Invoice
-from .services import InvoicePDFService
 
 
-# @shared_task
-# def send_invoice_email(invoice_id):
-#     invoice = Invoice.objects.select_related("client", "created_by").get(pk=invoice_id)
-
-#     if not invoice.pdf_file:
-#         InvoicePDFService.generate(invoice)
-
-#     invoice_link = f"{settings.FRONTEND_BASE_URL}/invoices/{invoice.id}/"
-
-#     html_body = render_to_string(
-#         "emails/invoice_email.html",
-#         {
-#             "invoice": invoice,
-#             "invoice_link": invoice_link,
-#             "sender_name": "Accounts Team",
-#         },
-#     )
-
-#     email = EmailMultiAlternatives(
-#         subject=f"Invoice {invoice.invoice_no}",
-#         body="Please view the invoice attached.",
-#         from_email=settings.DEFAULT_FROM_EMAIL,
-#         to=[invoice.client.email],
-#     )
-
-#     email.attach_alternative(html_body, "text/html")
-#     email.attach_file(invoice.pdf_file.path)
-#     email.send()
 
 @shared_task
 def send_invoice_email(invoice_id):

@@ -32,9 +32,6 @@ class Account(AbstractUser, RBACUserMixin):
         ],
         default="INR"
     )
-    # Do not force a specific storage backend here — use the project's
-    # DEFAULT_FILE_STORAGE. This avoids instantiating Cloudinary storage
-    # during model import when Cloudinary credentials may be invalid.
     profile_picture = models.ImageField(
         upload_to="profile_pictures/",
         null=True,

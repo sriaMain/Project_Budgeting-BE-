@@ -20,9 +20,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 
-# -------- Permissions tree (for UI left list) --------
 
-# c
 
 class PermissionTreeView(APIView):
     permission_classes = [AllowAny]
@@ -69,32 +67,7 @@ class CacheTestView(APIView):
         resp = Response({"cache_key": cache_key, "value": now, "status": "MISS"}, status=status.HTTP_200_OK)
         resp['X-Cache'] = 'MISS'
         return resp
-# class PermissionTreeView(APIView):
-#     # permission_classes = [IsAuthenticated, HasPermissionCode]
-#     # permission_code = "roles.permissions.view"
 
-#     def get(self, request):
-#         cache_key = "permission_tree_v1"
-#         data = cache.get(cache_key)
-
-#         if data:
-#             return Response(data)
-
-#         categories = PermissionCategory.objects.get_structured_permissions()
-#         serialized = PermissionCategorySerializer(categories, many=True).data
-
-#         cache.set(cache_key, serialized, timeout=3600)
-#         return Response(serialized, status=status.HTTP_200_OK)
-
-
-# class PermissionFlatListView(APIView):
-#     # permission_classes = [IsAuthenticated, HasPermissionCode]
-#     # permission_code = "roles.permissions.view"
-
-#     def get(self, request):
-#         perms = Permission.objects.filter(is_active=True).order_by("category__name", "label")
-#         serializer = PermissionSerializer(perms, many=True)
-#         return Response(serializer.data, status=status.HTTP_200_OK)
 
 class PermissionFlatListView(APIView):
     # permission_classes = [IsAuthenticated, HasPermissionCode]
@@ -111,84 +84,9 @@ class PermissionFlatListView(APIView):
 
 
 
-# -------- Role List + Create --------
-
-# class RoleListCreateView(APIView):
-#     # permission_classes = [IsAuthenticated, HasPermissionCode]
-
-#     def get(self, request):
-#         # self.permission_code = "roles.view"
-#         # if not self.check_permissions(request):
-#         #     return Response(status=status.HTTP_403_FORBIDDEN)
-
-#         roles = Role.objects.filter(is_active=True)
-#         serializer = RoleListSerializer(roles, many=True)
-#         return Response(serializer.data, status=status.HTTP_200_OK)
-
-#     def post(self, request):
-#         # self.permission_code = "roles.create"
-#         # if not self.check_permissions(request):
-#         #     return Response(status=status.HTTP_403_FORBIDDEN)
-
-#         serializer = RoleWriteSerializer(data=request.data)
-#         if serializer.is_valid():
-#             role = serializer.save()
-#             return Response(RoleDetailSerializer(role).data, status=status.HTTP_201_CREATED)
-
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 class RoleListCreateView(APIView):
-    # permission_classes = [IsAuthenticated, HasPermissionCode]
-
-    # Method → permission mapping
-    # permission_map = {
-    #     "GET": "roles.view",
-    #     "POST": "roles.create",
-    # }
+   
     permission_classes = [AllowAny]
-
-
-    # def get(self, request):
-    #     cache_key = "roles_list_v1"
-    #     data = cache.get(cache_key)
-
-    #     # ========== CACHE HIT ==========
-    #     if data:
-    #         response = Response(data, status=status.HTTP_200_OK)
-    #         response['X-Cache'] = 'HIT'
-    #         return response
-
-    #     roles = (
-    #         Role.objects.filter()
-    #         # .prefetch_related("permissions")
-    #         .order_by("role_name")
-    #     )
-
-    #     serialized = RoleListSerializer(roles, many=True).data
-    #     # Cache the serialized data (not the serializer class)
-    #     cache.set(cache_key, serialized, timeout=3600)
-
-    #     response = Response(serialized, status=status.HTTP_200_OK)
-    #     response['X-Cache'] = 'MISS'
-    #     return response
-
-    # def get(self, request):
-    #     cache_key = "roles_list_v1"
-    #     data = cache.get(cache_key)
-
-    #     if data:
-    #         response = Response(data, status=status.HTTP_200_OK)
-    #         response['X-Cache'] = 'HIT'
-    #         return response
-
-    #     roles = Role.objects.all().order_by("role_name")
-    #     serialized = RoleListSerializer(roles, many=True).data
-
-    #     cache.set(cache_key, serialized, timeout=3600)
-
-    #     response = Response(serialized, status=status.HTTP_200_OK)
-    #     response['X-Cache'] = 'MISS'
-    #     return response
 
     def get(self, request):
         cache_key = "roles_list_active_v1"
@@ -223,56 +121,6 @@ class RoleListCreateView(APIView):
             status=status.HTTP_201_CREATED
         )
 
-# -------- Role Detail / Update / Delete --------
-
-# class RoleDetailView(APIView):
-#     # permission_classes = [IsAuthenticated, HasPermissionCode]
-
-#     def get_object(self, pk):
-#         return get_object_or_404(Role, pk=pk)
-
-#     def get(self, request, pk):
-#         # self.permission_code = "roles.view"
-#         # if not self.check_permissions(request):
-#         #     return Response(status=status.HTTP_403_FORBIDDEN)
-
-#         role = self.get_object(pk)
-#         serializer = RoleDetailSerializer(role)
-#         return Response(serializer.data, status=status.HTTP_200_OK)
-
-#     def put(self, request, pk):
-#         # self.permission_code = "roles.update"
-#         # if not self.check_permissions(request):
-#         #     return Response(status=status.HTTP_403_FORBIDDEN)
- 
-#         role = self.get_object(pk)
-#         serializer = RoleWriteSerializer(role, data=request.data)
-#         if serializer.is_valid():
-#             updated = serializer.save()
-#             return Response(RoleDetailSerializer(updated).data, status=status.HTTP_200_OK)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-#     def patch(self, request, pk):
-#         # self.permission_code = "roles.update"
-#         # if not self.check_permissions(request):
-#         #     return Response(status=status.HTTP_403_FORBIDDEN)
-
-#         role = self.get_object(pk)
-#         serializer = RoleWriteSerializer(role, data=request.data, partial=True)
-#         if serializer.is_valid():
-#             updated = serializer.save(modified_by=request.user)
-#             return Response(RoleDetailSerializer(updated).data, status=status.HTTP_200_OK)
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-#     def delete(self, request, pk):
-#         # self.permission_code = "roles.delete"
-#         # if not self.check_permissions(request):
-#         #     return Response(status=status.HTTP_403_FORBIDDEN)
-
-#         role = self.get_object(pk)
-#         role.is_active = False
-#         role.save(update_fields=["is_active", "modified_at"])
-#         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class RoleDetailView(APIView):

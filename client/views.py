@@ -5,15 +5,11 @@ from django.shortcuts import get_object_or_404
 from django.db import DatabaseError
 from django.core.exceptions import ValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
-
-
 from .models import Company, CompanyTag
 from .serializers import CompanySerializer, CompanyTagSerializer
 from rest_framework.permissions import AllowAny as All
 from .models import POC
 from .serializers import PointOfContactSerializer
-
-
 
 
 class CompanyListCreateAPIView(APIView):

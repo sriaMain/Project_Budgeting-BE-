@@ -2,8 +2,6 @@
 from .serializers import QuoteSummarySerializer
 from .models import Quote
 from django.db.models import Avg, Sum, Count
-
-
 from django.shortcuts import render
 from django.http import Http404
 from .models import ProductGroup, Product_Services, Quote
@@ -236,15 +234,7 @@ class QuoteDetailView(APIView):
         serializer = QuoteDetailSerializer(quote)
         return Response(serializer.data)
 
-    # def put(self, request, pk):
-    #     quote = self.get_object(pk)
-    #     serializer = QuoteSerializer(quote, data=request.data, partial=True)
-    #     if serializer.is_valid():
-    #         serializer.save(modified_by=request.user)
-    #         return Response(serializer.data)
-    #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-   
+    
 
     def put(self, request, pk):
         quote = self.get_object(pk)

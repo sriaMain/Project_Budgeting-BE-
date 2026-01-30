@@ -477,7 +477,6 @@ from django.db.models import Sum
 from django.core.validators import MinValueValidator
 import uuid
 
-
 class Expense(models.Model):
 
     CATEGORY_CHOICES = [
@@ -540,10 +539,13 @@ class Expense(models.Model):
     def __str__(self):
         return self.expense_no
 
-    # 🔐 MODEL VALIDATIONS
+    # 🔐 MODEL VALIDATION
     def clean(self):
         if self.expense_date > timezone.localdate():
             raise ValidationError("Expense date cannot be in the future")
+
+        if self.pk and self.total_paid() > self.amount:
+            raise ValidationError("Expense amount cannot be less than already paid amount")
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -560,10 +562,11 @@ class Expense(models.Model):
         )['total'] or Decimal('0.00')
 
     def balance_amount(self):
-        return self.amount - self.total_paid()
+        balance = self.amount - self.total_paid()
+        return max(balance, Decimal('0.00'))
 
     def is_fully_paid(self):
-        return self.balance_amount() <= 0
+        return self.balance_amount() == Decimal('0.00')
 
 
 class ExpensePayment(models.Model):
@@ -596,7 +599,6 @@ class ExpensePayment(models.Model):
 
     @transaction.atomic
     def save(self, *args, **kwargs):
-
         if self.expense.is_fully_paid():
             raise ValidationError("Expense is already fully paid")
 

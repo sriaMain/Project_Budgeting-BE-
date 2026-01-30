@@ -7,13 +7,6 @@ from django.core.cache import cache
 
 
 
-# --- IMPORTANT ---
-# All models are defined here, so top-level imports are fine for each other.
-# This prevents circular import issues as long as your app's models are
-# not trying to import something from another app's models that in turn
-# imports from roles's models.
-
-
 class PermissionCategoryManager(models.Manager):
     def get_structured_permissions(self):
         """

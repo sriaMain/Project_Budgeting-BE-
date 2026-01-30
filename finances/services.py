@@ -342,10 +342,6 @@ class InvoicePDFService:
 
         elements.append(summary_table)
         elements.append(Spacer(1, 18))
-
-        # -------------------------------
-        # 📜 TERMS & FOOTER
-        # -------------------------------
         elements.append(
             Paragraph(
                 "<b>Payment terms:</b> Immediate Payment<br/>"

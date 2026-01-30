@@ -6,6 +6,9 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from datetime import datetime, date
 from .models import Invoice, InvoiceItem, InvoicePayment, ProjectAttachment
 from Project.models import Project
+from .models import Expense, ExpensePayment
+from rest_framework.exceptions import ValidationError
+
 
 
 
@@ -653,19 +656,76 @@ class ProjectAttachmentSerializer(serializers.ModelSerializer):
         print(f"URL after upload: {attachment.file.url}")
         
         return attachment
-from rest_framework import serializers
-from .models import Expense, ExpensePayment
 
+
+
+class ExpensePaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExpensePayment
+        fields = (
+            'id',
+            'payment_date',
+            'amount',
+            'payment_method',
+            'reference_no',
+            'created_at',
+        )
+    def validate(self, attrs):
+        expense = self.context.get('expense')
+        amount = attrs.get('amount')
+
+        if expense.is_fully_paid():
+            raise ValidationError({
+                "amount": "This expense is already fully paid"
+            })
+
+        if amount > expense.balance_amount():
+            raise ValidationError({
+                "amount": "Payment exceeds expense balance"
+            })
+
+        return attrs
+
+
+# class ExpenseSerializer(serializers.ModelSerializer):
+#     total_paid = serializers.SerializerMethodField()
+#     balance_amount = serializers.SerializerMethodField()
+#     is_fully_paid = serializers.SerializerMethodField()
+#     payment_count = serializers.SerializerMethodField()
+#     payments = ExpensePaymentSerializer(many=True, read_only=True)
+
+#     class Meta:
+#         model = Expense
+#         fields = '__all__'
+#         read_only_fields = ('expense_no', 'created_by', 'created_at')
+
+#     def get_total_paid(self, obj):
+#         return obj.total_paid()
+
+#     def get_balance_amount(self, obj):
+#         return obj.balance_amount()
+
+#     def get_is_fully_paid(self, obj):
+#         return obj.is_fully_paid()
+
+#     def get_payment_count(self, obj):
+#         return obj.payments.count()
 
 class ExpenseSerializer(serializers.ModelSerializer):
     total_paid = serializers.SerializerMethodField()
     balance_amount = serializers.SerializerMethodField()
     is_fully_paid = serializers.SerializerMethodField()
+    payment_count = serializers.SerializerMethodField()
+    payments = ExpensePaymentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Expense
         fields = '__all__'
-        read_only_fields = ('expense_no', 'created_by', 'created_at')
+        read_only_fields = (
+            'expense_no',
+            'created_by',
+            'created_at',
+        )
 
     def get_total_paid(self, obj):
         return obj.total_paid()
@@ -676,12 +736,16 @@ class ExpenseSerializer(serializers.ModelSerializer):
     def get_is_fully_paid(self, obj):
         return obj.is_fully_paid()
 
+    def get_payment_count(self, obj):
+        return obj.payments.count()
 
-class ExpensePaymentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ExpensePayment
-        fields = '__all__'
-        read_only_fields = ('expense', 'created_at')
+
+
+# class ExpensePaymentSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = ExpensePayment
+#         fields = '__all__'
+#         read_only_fields = ('expense', 'created_at')
 
 
 class ProjectExpenseListSerializer(serializers.ModelSerializer):

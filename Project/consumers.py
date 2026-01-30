@@ -64,9 +64,6 @@ class TaskTimerConsumer(AsyncJsonWebsocketConsumer):
         elif action == "pause":
             await self.pause_timer()
 
-    # ============================================================
-    # START TIMER
-    # ============================================================
 
     async def start_timer(self, content):
         task_id, start_time = get_active_timer(self.user.id)
@@ -137,9 +134,7 @@ class TaskTimerConsumer(AsyncJsonWebsocketConsumer):
             "started_at": None,
         })
 
-    # ============================================================
-    # HELPERS
-    # ============================================================
+
 
     async def get_previous_seconds(self, task_id):
         logs = await sync_to_async(list)(

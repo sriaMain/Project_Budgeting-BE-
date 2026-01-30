@@ -49,25 +49,6 @@ class Project(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
 
-    # def save(self, *args, **kwargs):
-    #     # Auto-generate project number if not set
-    #     # if not self.project_no:
-    #     # 	from datetime import datetime
-    #     # 	today = datetime.now().strftime('%Y%m%d')
-    #     # 	last = Project.objects.filter(project_no__startswith=f'PRJ-{today}').count() + 1
-    #     # 	self.project_no = f'PRJ-{today}-{last:03d}'
-
-    #     # Auto-assign client and project_manager from quotation if available
-    #     if self.created_from_quotation:
-    #         if hasattr(self.created_from_quotation, 'client'):
-    #             self.client = self.created_from_quotation.client
-    #         if hasattr(self.created_from_quotation, 'project_manager'):
-    #             self.project_manager = self.created_from_quotation.project_manager
-
-    #     if self.end_date < self.start_date:
-    #         raise ValidationError(_('End date cannot be before start date.'))
-    #     super().save(*args, **kwargs)
-
     def clean(self):
         if self.project_type == 'external' and not self.created_from_quotation:
             raise ValidationError("Quotation is required for external projects.")
@@ -86,11 +67,6 @@ class Project(models.Model):
     def __str__(self):
         return f"{self.project_name} ({self.project_no})"
     
-
-
-
-
-
 class ProjectBudget(models.Model):
     project = models.OneToOneField(Project, on_delete=models.SET_NULL, null=True, related_name='budget')
     use_quoted_amounts = models.BooleanField(default=True)
@@ -124,7 +100,7 @@ class ProjectBudget(models.Model):
 
 
 
-# class Task(models.Model):
+
 class Task(models.Model):
     STATUS_CHOICES = [
         ('planned', 'Planned'),

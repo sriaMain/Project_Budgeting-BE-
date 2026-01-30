@@ -55,7 +55,7 @@ path("attachments/<int:attachment_id>/",ProjectAttachmentView.as_view(),name="de
 path("attachments/<int:attachment_id>/download/",DownloadAttachmentView.as_view(),name="download-attachment",),
 path('expenses/', ExpenseAPIView.as_view(),name='expenses'),
 path('expenses/<int:pk>/', ExpenseAPIView.as_view(),name='expense-detail'),
-path('expenses/<int:pk>/', ExpensePaymentAPIView.as_view(),name='expense-payments'),
+path('expenses/<int:pk>/payments/', ExpensePaymentAPIView.as_view(),name='expense-payments'),
 path('projects/<int:project_id>/expenses/', ProjectExpenseListAPIView.as_view(),name='project-expenses'),
 path('expenses/categories/', ExpenseCategoryAPIView.as_view(),name='expense-categories'),
 ]

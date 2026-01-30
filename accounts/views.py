@@ -1,13 +1,3 @@
-# accounts/views.py
-"""
-Views for account auth and password-reset flow.
-
-Flow:
-- POST /api/accounts/login/          -> LoginView (identifier + password) -> JWTs
-- POST /api/accounts/otp-request/    -> OTPRequestView (gmail) -> sends OTP via SMTP
-- POST /api/accounts/verify-otp/     -> OTPVerifyView (gmail + otp) -> returns reset_token
-- POST /api/accounts/reset-password/ -> ResetPasswordView (new_password + confirm_password, header X-Reset-Token)
-"""
 
 from rest_framework import generics, permissions, status
 from rest_framework.views import APIView
@@ -166,9 +156,7 @@ class RefreshTokenCookieView(APIView):
 
 
 
-# --------------------
-# OTP REQUEST VIEW
-# --------------------
+
 class OTPRequestView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
@@ -179,9 +167,6 @@ class OTPRequestView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# --------------------
-# OTP VERIFY VIEW
-# --------------------
 class OTPVerifyView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
@@ -194,10 +179,6 @@ class OTPVerifyView(APIView):
             }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-# --------------------
-# RESET PASSWORD VIEW
-# --------------------
 class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
@@ -215,10 +196,6 @@ class LogoutView(APIView):
         return response
 
 
-
-# --------------------
-# RESEND OTP VIEW
-# --------------------
 class ResendOTPView(APIView):
     def post(self, request):
         serializer = ResendOTPSerializer(data=request.data)
@@ -343,36 +320,6 @@ class UserDetailVieW(APIView):
         # cache.delete("users_list")
         return Response(serializer.data, status=200)
     
-
-    # def put(self, request, id):
-    #     # if not request.user.has_role_permission(self.permission_code):
-    #     #     return Response({"error": "Permission denied"}, status=403)
-
-    #     try:
-    #         user = User.objects.get(id=id)
-
-    #     except User.DoesNotExist:
-    #         return Response({"error": "User not found"}, status=404)
-
-    #     serializer = UserDetailSerializer(user, data=request.data, partial=True)
-
-    #     try:
-    #         serializer.is_valid(raise_exception=True)
-    #         serializer.save()
-    #         cache.delete("users_list")  # Invalidate cache
-
-    #         return Response(serializer.data, status=200)
-
-    #     except DRFValidationError as e:
-    #         errors = format_validation_errors(e.detail)
-    #         return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
-
-    #     except Exception as e:
-    #         logger.error(f"UserDetailView PUT Error: {str(e)}", exc_info=True)
-    #         return Response(
-    #             {"error": "Internal server error", "details": str(e)},
-    #             status=500,
-    #         )
 
     def put(self, request, id):
         try:
